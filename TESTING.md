@@ -10,7 +10,7 @@
 ## Step 1：啟動所有服務
 
 ```bash
-cd "cloud native project"
+cd "FP-PACS-system"
 docker-compose up --build
 ```
 
