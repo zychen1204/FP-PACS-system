@@ -1,251 +1,233 @@
-# 🎯 PACS 系統完整測試指南
+# PACS 完整執行與測試流程
 
-## 📋 項目說明
+## 前置需求
 
-**PACS = Physical Access Control System（物理訪問控制系統）**
-
-一個員工刷卡管理系統：
-- 📊 追蹤員工進出（進入/離開）
-- 🔐 防止反尾隨（同方向連續刷卡被拒）
-- 📈 生成出席報表
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) 已安裝並啟動
+- 確保 Port 80, 5432, 6379, 8080, 8081 未被佔用
 
 ---
 
-## 🏗️ 項目結構
+## Step 1：啟動所有服務
+
+```bash
+cd "cloud native project"
+docker-compose up --build
+```
+
+預期輸出（等待所有服務啟動完成）：
 
 ```
-pacs/
-├── frontend/              ← 前端 Web 應用（HTML/CSS/JS）
-│   ├── TESTING.md        （前端測試指南）
-│   ├── index.html        （主頁面）
-│   ├── app.js            （應用邏輯）
-│   └── style.css         （樣式）
-│
-└── backend/              ← 後端 Go 微服務
-    ├── TESTING.md        （後端測試指南）
-    ├── main.go           （程序入口）
-    ├── go.mod            （依賴管理）
-    ├── handlers/         （API 處理程序）
-    └── models/           （數據結構）
+✅ PostgreSQL connected
+✅ Redis cache connected
+✅ Redis Stream connected
+🔐 Access API listening on :8080
+📊 Reporting API listening on :8081
+🔄 Listening for events on stream 'pacs:events'...
 ```
+
+> 如果想在背景執行，使用 `docker-compose up --build -d`
 
 ---
 
-## 🚀 快速開始
+## Step 2：確認服務健康狀態
 
-### 步驟 1: 啟動後端
+```bash
+# 檢查所有容器狀態
+docker-compose ps
 
-**Windows PowerShell:**
-```powershell
-cd backend
-$env:Path += ";C:\Program Files\Go\bin"
-go run main.go
+# Access API 健康檢查
+curl http://localhost:8080/healthz
+
+# Reporting API 健康檢查
+curl http://localhost:8081/healthz
 ```
 
-**確認後端運行:**
-```
-✓ Access API:       http://localhost:8080/v1/swipe
-✓ Reporting API:    http://localhost:8081/v1/reports/attendance
-🔐 Starting Access API on port 8080...
-📊 Starting Reporting API on port 8081...
-```
-
-### 步驟 2: 打開前端
-
-在瀏覽器中打開 `frontend/index.html`：
-
-**方式 1（推薦）：** 在 VS Code 中右鍵點擊 `frontend/index.html` → "Open with Live Server"
-
-**方式 2：** 手動打開，在瀏覽器網址欄輸入：
-```
-file:///<your-project-path>/pacs/frontend/index.html
-```
-
-**方式 3（簡單）：** 在 PowerShell 中執行：
-```powershell
-Start-Process "$PWD/frontend/index.html"
-```
-
-### 步驟 3: 測試系統
-
-1. 切換到「⚙️ 設定」標籤
-2. 點擊「🔗 測試連線」
-3. 應看到：`✓ Access API 連線成功` 和 `✓ Reporting API 連線成功`
-
----
-
-## 📊 測試流程
-
-### 測試 1: 正常刷卡
-
-1. 切換到「🔑 刷卡模擬」標籤
-2. 輸入:
-   - 員工 ID: `E001`
-   - 廠區: `Site-A`
-   - 門閘: `Gate-1`
-   - 方向: `進入 (IN)`
-3. 點擊「送出刷卡請求」
-4. ✓ 顯示「進入成功」(200)
-
-### 測試 2: 反尾隨機制
-
-1. 再次送出相同刷卡（還是進入 IN）
-2. ✗ 應顯示「反尾隨被拒」(403)
-
-### 測試 3: 改變方向
-
-1. 改為「離開 (OUT)」
-2. ✓ 應成功（200）
-
-### 測試 4: 再次進入
-
-1. 改為「進入 (IN)」
-2. ✓ 應成功（200）- 因為上次是 OUT
-
-### 測試 5: 查看報表
-
-1. 切換到「📊 出席報表」標籤
-2. 點擊「取得報表」
-3. ✓ 應顯示員工 E001 的進出記錄
-
----
-
-## 🔄 系統數據流
-
-```
-前端 (HTML/JS)
-    ↓
-[POST /v1/swipe]  或  [GET /v1/reports/attendance]
-    ↓
-後端 API (Go)
-    ├── Access API (Port 8080)
-    │   ├── 驗證刷卡請求
-    │   ├── 檢查反尾隨
-    │   └── 記錄訪問日誌
-    │
-    └── Reporting API (Port 8081)
-        ├── 讀取訪問日誌
-        ├── 按員工分組
-        └── 生成報表
-    ↓
-共享狀態 (メモリ中)
-    ├── AccessLog []
-    └── AntiPassback map
-    ↓
-前端渲染結果
+預期回應：
+```json
+{"service":"access-api","status":"healthy","uptime":"..."}
 ```
 
 ---
 
-## 📝 詳細測試指南
+## Step 3：測試刷卡功能 (FR1 - InOut Operation)
 
-### 前端測試
-👉 詳見: [frontend/TESTING.md](frontend/TESTING.md)
-- UI 元件測試
-- localStorage 測試
-- 連線測試
+### 3.1 正常刷卡進入
 
-### 後端測試
-👉 詳見: [backend/TESTING.md](backend/TESTING.md)
-- API 端點測試
-- 反尾隨邏輯驗證
-- 報表生成驗證
-
----
-
-## ✅ 驗證清單
-
-### 後端驗證
-- [ ] Go 已安裝 (`go version`)
-- [ ] 後端啟動無錯誤
-- [ ] Port 8080 可訪問
-- [ ] Port 8081 可訪問
-- [ ] Access API 回應 200
-- [ ] Reporting API 回應 200
-
-### 前端驗證
-- [ ] 前端頁面打開正常
-- [ ] 三個標籤可正常切換
-- [ ] 測試連線成功
-- [ ] 可發送刷卡請求
-- [ ] 可查看報表
-- [ ] 設定可保存
-
-### 功能驗證
-- [ ] 首次刷卡成功
-- [ ] 反尾隨被正確拒絕
-- [ ] 改變方向後可進行
-- [ ] 報表正確顯示數據
-- [ ] CORS 正常工作
-
----
-
-## 🐛 故障排查
-
-### 後端無法啟動
-
-**症狀:** `go: command not found`
-
-**解決:**
-```powershell
-$env:Path += ";C:\Program Files\Go\bin"
-go version  # 驗證
-go run main.go
+```bash
+curl -X POST http://localhost:8080/v1/swipe ^
+  -H "Content-Type: application/json" ^
+  -d "{\"badge_id\":\"B001\",\"site_id\":\"Site-A\",\"gate_id\":\"Gate-1\",\"direction\":\"IN\"}"
 ```
 
-### 前端無法連接後端
+預期回應：
+```json
+{"status":"SUCCESS","message":"Access granted"}
+```
 
-**症狀:** 「🔗 測試連線」顯示紅色 ✗
+### 3.2 正常刷卡離開
 
-**檢查:**
-1. 後端是否運行？
-2. Port 是否正確？
-3. 防火牆設定？
-4. 在「⚙️ 設定」修改 API 地址
+```bash
+curl -X POST http://localhost:8080/v1/swipe ^
+  -H "Content-Type: application/json" ^
+  -d "{\"badge_id\":\"B001\",\"site_id\":\"Site-A\",\"gate_id\":\"Gate-1\",\"direction\":\"OUT\"}"
+```
 
-### Port 被占用
+預期回應：
+```json
+{"status":"SUCCESS","message":"Access granted"}
+```
 
-**症狀:** `address already in use`
+### 3.3 Anti-Passback 測試 (FR2)
 
-**解決:**
-1. 找出占用進程: `netstat -ano | findstr :8080`
-2. 關閉進程或修改 main.go 中的端口
+連續刷同方向兩次（先執行 3.1 後再執行一次 IN）：
+
+```bash
+curl -X POST http://localhost:8080/v1/swipe ^
+  -H "Content-Type: application/json" ^
+  -d "{\"badge_id\":\"B001\",\"site_id\":\"Site-A\",\"gate_id\":\"Gate-1\",\"direction\":\"IN\"}"
+```
+
+預期回應（HTTP 403）：
+```json
+{"status":"REJECTED_APB","message":"Anti-Passback Violation","error_code":"ERR_ANTI_PASSBACK"}
+```
+
+### 3.4 多員工批次刷卡
+
+```bash
+curl -X POST http://localhost:8080/v1/swipe -H "Content-Type: application/json" -d "{\"badge_id\":\"B002\",\"site_id\":\"Site-A\",\"gate_id\":\"Gate-1\",\"direction\":\"IN\"}"
+curl -X POST http://localhost:8080/v1/swipe -H "Content-Type: application/json" -d "{\"badge_id\":\"B003\",\"site_id\":\"Site-B\",\"gate_id\":\"Gate-2\",\"direction\":\"IN\"}"
+curl -X POST http://localhost:8080/v1/swipe -H "Content-Type: application/json" -d "{\"badge_id\":\"B002\",\"site_id\":\"Site-A\",\"gate_id\":\"Gate-1\",\"direction\":\"OUT\"}"
+curl -X POST http://localhost:8080/v1/swipe -H "Content-Type: application/json" -d "{\"badge_id\":\"B003\",\"site_id\":\"Site-B\",\"gate_id\":\"Gate-2\",\"direction\":\"OUT\"}"
+```
 
 ---
 
-## 📚 相關文檔
+## Step 4：測試事件持久化 (FR4)
 
-- [frontend/README.md](frontend/README.md) - 前端架構說明
-- [backend/README.md](backend/README.md) - 後端架構說明
-- [frontend/TESTING.md](frontend/TESTING.md) - 前端詳細測試指南
-- [backend/TESTING.md](backend/TESTING.md) - 後端詳細測試指南
+驗證事件已寫入 PostgreSQL：
+
+```bash
+docker-compose exec postgres psql -U pacs_user -d pacs_db -c "SELECT * FROM access_events ORDER BY event_time DESC LIMIT 10;"
+```
+
+預期看到所有刷卡紀錄（包含 SUCCESS 和 REJECTED_APB）。
 
 ---
 
-## 🎯 測試順序建議
+## Step 5：測試出席報表 (FR5)
 
-1. **確認後端運行**
-   ```
-   cd backend
-   $env:Path += ";C:\Program Files\Go\bin"
-   go run main.go
-   ```
+```bash
+# 取得所有出席報表
+curl http://localhost:8081/v1/reports/attendance
 
-2. **打開前端頁面**
-   
-   在瀏覽器打開 `frontend/index.html`（具體路徑取決於你的項目位置）
+# 依日期查詢（替換為今天的日期）
+curl "http://localhost:8081/v1/reports/attendance?date=2026-05-03"
+```
 
-3. **測試連線**
-   - ⚙️ 設定 → 🔗 測試連線
+預期回應：
+```json
+[
+  {
+    "employee_id": "B001",
+    "name": "王小明",
+    "org_path": "TSMC.Fab12.製造部",
+    "work_date": "2026-05-03",
+    "first_in": "...",
+    "last_out": "...",
+    "swipe_count": 4,
+    "stay_hours": 0.5
+  }
+]
+```
 
-4. **進行功能測試**
-   - 刷卡模擬
-   - 反尾隨機制
-   - 報表查詢
+---
 
-5. **使用 curl 進行 API 測試（可選）**
-   ```bash
-   curl http://localhost:8080/healthz
-   curl http://localhost:8081/healthz
-   ```
+## Step 6：測試稽核查詢 (FR13)
 
+```bash
+curl "http://localhost:8081/v1/audit?badge_id=B001&start_date=2026-05-01&end_date=2026-05-31"
+```
+
+預期回應：該員工在指定日期範圍的完整事件列表（包含被拒絕的）。
+
+---
+
+## Step 7：測試 Metrics (NFR7)
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+預期回應：
+```
+# HELP pacs_swipe_total Total badge swipes
+# TYPE pacs_swipe_total counter
+pacs_swipe_total{status="success"} 6
+pacs_swipe_total{status="rejected"} 1
+```
+
+---
+
+## Step 8：測試前端介面
+
+1. 開啟瀏覽器前往 **http://localhost**
+2. 在「刷卡模擬」頁面：
+   - 輸入 Badge ID（例如 B001）
+   - 選擇地點和閘門
+   - 點擊進入或離開
+   - 確認回應顯示 SUCCESS 或 REJECTED_APB
+3. 在「出席報表」頁面：
+   - 點擊「取得報表」
+   - 確認顯示出席紀錄，包含停留時數
+4. 在「設定」頁面：
+   - 點擊「測試連線」確認 Access API 和 Reporting API 都顯示 ✓
+
+---
+
+## Step 9：驗證不可變更稽核 (FR12)
+
+```bash
+docker-compose exec postgres psql -U pacs_user -d pacs_db -c "DELETE FROM access_events WHERE id = 1;"
+```
+
+預期回應（應該失敗）：
+```
+ERROR: permission denied for table access_events
+```
+
+---
+
+## Step 10：停止服務
+
+```bash
+# 停止所有服務
+docker-compose down
+
+# 停止並清除資料庫資料
+docker-compose down -v
+```
+
+---
+
+## 常見問題
+
+| 問題 | 解決方案 |
+|------|----------|
+| Port 已被佔用 | 停止佔用 port 的程式，或在 docker-compose.yml 中修改 port mapping |
+| PostgreSQL 連線失敗 | 等待 health check 完成，event-processor 會自動重試 30 次 |
+| 前端無法連線後端 | 確認 Nginx 容器正常運行，API 透過反向代理存取 |
+| go mod tidy 本地失敗 | 不影響 Docker 建置，依賴在容器內解析 |
+
+---
+
+## 服務架構一覽
+
+| 服務 | Port | 角色 | 依賴 |
+|------|------|------|------|
+| frontend | 80 | Nginx 靜態網頁 + 反向代理 | access-api, reporting-api |
+| access-api | 8080 | 刷卡決策 (Write Plane) | Redis |
+| event-processor | 8082 (health) | 事件持久化 | Redis, PostgreSQL |
+| reporting-api | 8081 | 報表查詢 (Read Plane) | PostgreSQL |
+| postgres | 5432 | 主資料庫 | - |
+| redis | 6379 | 快取 + 訊息佇列 | - |

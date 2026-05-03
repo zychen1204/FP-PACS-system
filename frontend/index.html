@@ -106,13 +106,7 @@
             <section id="report-tab" class="tab-content">
                 <div class="card">
                     <h2>出席報表</h2>
-                    <p class="subtitle">查看員工出席紀錄（需要有效的 JWT Token）</p>
-
-                    <div class="form-group">
-                        <label for="jwt-token">JWT Token</label>
-                        <textarea id="jwt-token" placeholder="貼上你的 JWT token..." rows="3"></textarea>
-                        <small>用於認證報表查詢。如果沒有 Token，可以使用 Bearer token 格式。</small>
-                    </div>
+                    <p class="subtitle">查看員工出席紀錄（資料來自 PostgreSQL）</p>
 
                     <button id="btn-fetch-report" class="btn btn-primary">
                         📥 取得報表
@@ -132,10 +126,11 @@
                                     <th>進入時間</th>
                                     <th>離開時間</th>
                                     <th>刷卡次數</th>
+                                    <th>停留時數</th>
                                 </tr>
                             </thead>
                             <tbody id="report-tbody">
-                                <tr class="empty"><td colspan="7">點擊「取得報表」以載入資料</td></tr>
+                                <tr class="empty"><td colspan="8">點擊「取得報表」以載入資料</td></tr>
                             </tbody>
                         </table>
                     </div>

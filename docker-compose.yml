@@ -1,8 +1,10 @@
 version: '3.8'
 
 services:
-  postgres-primary:
-    image: postgres:15
+  # ─── Infrastructure ─────────────────────────────────
+
+  postgres:
+    image: postgres:15-alpine
     environment:
       POSTGRES_USER: pacs_user
       POSTGRES_PASSWORD: pacs_password
@@ -10,44 +12,105 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      - pgdata:/var/lib/postgresql/data
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pacs_user -d pacs_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
-
-  # In a real environment, this would be a separate server replicating from primary.
-  # For local dev, we simulate it with another instance pointed to the same DB or just use primary.
-  postgres-replica:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: pacs_user
-      POSTGRES_PASSWORD: pacs_password
-      POSTGRES_DB: pacs_db
-    ports:
-      - "5433:5432"
-    depends_on:
-      - postgres-primary
+      retries: 10
+    networks:
+      - pacs-network
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    command: redis-server --save 60 1 --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - pacs-network
 
-  pubsub:
-    image: google/cloud-sdk:latest
+  # ─── Backend Microservices ──────────────────────────
+
+  access-api:
+    build:
+      context: ./backend
+      args:
+        SERVICE: access-api
     ports:
-      - "8085:8085"
-    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=pacs-dev
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=8080
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - pacs-network
+
+  event-processor:
+    build:
+      context: ./backend
+      args:
+        SERVICE: event-processor
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=pacs_user
+      - DB_PASSWORD=pacs_password
+      - DB_NAME=pacs_db
+      - HEALTH_PORT=8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pacs-network
+
+  reporting-api:
+    build:
+      context: ./backend
+      args:
+        SERVICE: reporting-api
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=pacs_user
+      - DB_PASSWORD=pacs_password
+      - DB_NAME=pacs_db
+      - PORT=8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pacs-network
+
+  # ─── Frontend ───────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - access-api
+      - reporting-api
+    networks:
+      - pacs-network
+
+volumes:
+  pgdata:
+
+networks:
+  pacs-network:
+    driver: bridge

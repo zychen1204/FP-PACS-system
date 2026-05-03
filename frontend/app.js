@@ -5,8 +5,8 @@
 // ============ STATE MANAGEMENT ============
 const state = {
     swipeHistory: [],
-    apiUrl: localStorage.getItem('apiUrl') || 'http://localhost:8080',
-    reportUrl: localStorage.getItem('reportUrl') || 'http://localhost:8081',
+    apiUrl: localStorage.getItem('apiUrl') || '',
+    reportUrl: localStorage.getItem('reportUrl') || '',
     lastDirection: 'IN'
 };
 
@@ -24,22 +24,16 @@ function initializeApp() {
 
 // ============ EVENT LISTENERS ============
 function setupEventListeners() {
-    // Tab Navigation
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', switchTab);
     });
 
-    // Swipe Tab
     document.getElementById('btn-in').addEventListener('click', (e) => selectDirection(e, 'IN'));
     document.getElementById('btn-out').addEventListener('click', (e) => selectDirection(e, 'OUT'));
     document.getElementById('btn-swipe').addEventListener('click', sendSwipe);
     document.getElementById('btn-clear-history').addEventListener('click', clearHistory);
     document.getElementById('btn-export-history').addEventListener('click', exportHistory);
-
-    // Report Tab
     document.getElementById('btn-fetch-report').addEventListener('click', fetchReport);
-
-    // Settings Tab
     document.getElementById('btn-test-connection').addEventListener('click', testServerConnection);
     document.getElementById('api-url').addEventListener('change', saveSettings);
     document.getElementById('report-url').addEventListener('change', saveSettings);
@@ -48,12 +42,8 @@ function setupEventListeners() {
 // ============ TAB SWITCHING ============
 function switchTab(e) {
     const tabName = e.target.getAttribute('data-tab');
-
-    // Remove active class from all tabs and buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-
-    // Add active class to current tab and button
     e.target.classList.add('active');
     document.getElementById(tabName).classList.add('active');
 }
@@ -62,9 +52,16 @@ function switchTab(e) {
 function selectDirection(e, direction) {
     document.getElementById('direction').value = direction;
     state.lastDirection = direction;
-
     document.querySelectorAll('.direction-btn').forEach(btn => btn.classList.remove('active'));
     e.target.classList.add('active');
+}
+
+// ============ API URL HELPERS ============
+function getApiUrl() {
+    return state.apiUrl || window.location.origin;
+}
+function getReportUrl() {
+    return state.reportUrl || window.location.origin;
 }
 
 // ============ SWIPE REQUEST ============
@@ -87,21 +84,16 @@ async function sendSwipe() {
     };
 
     try {
-        const response = await fetch(`${state.apiUrl}/v1/swipe`, {
+        const response = await fetch(`${getApiUrl()}/v1/swipe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
         const data = await response.json();
-
-        // Display Response
         displaySwipeResponse(response.status, data);
-
-        // Add to History
         addToSwipeHistory(badgeId, siteId, gateId, direction, data.status);
 
-        // Reset Form
         setTimeout(() => {
             document.getElementById('direction').value = state.lastDirection;
             document.querySelectorAll('.direction-btn').forEach(btn => btn.classList.remove('active'));
@@ -138,15 +130,11 @@ function displaySwipeResponse(status, data) {
 function addToSwipeHistory(badgeId, siteId, gateId, direction, status) {
     const record = {
         timestamp: new Date().toLocaleTimeString('zh-TW'),
-        badgeId,
-        siteId,
-        gateId,
-        direction,
-        status
+        badgeId, siteId, gateId, direction, status
     };
 
-    state.swipeHistory.unshift(record); // Add to front
-    if (state.swipeHistory.length > 50) state.swipeHistory.pop(); // Keep only last 50
+    state.swipeHistory.unshift(record);
+    if (state.swipeHistory.length > 50) state.swipeHistory.pop();
 
     saveSwipeHistory();
     renderSwipeHistory();
@@ -166,14 +154,11 @@ function loadSwipeHistory() {
 
 function renderSwipeHistory() {
     const tbody = document.getElementById('history-tbody');
-    const emptyRow = tbody.querySelector('.empty');
 
     if (state.swipeHistory.length === 0) {
         tbody.innerHTML = '<tr class="empty"><td colspan="5">還沒有刷卡紀錄</td></tr>';
         return;
     }
-
-    if (emptyRow) emptyRow.remove();
 
     tbody.innerHTML = state.swipeHistory.map(record => {
         const statusClass = record.status === 'SUCCESS' ? 'status-success' : 'status-error';
@@ -208,21 +193,14 @@ function exportHistory() {
 
     const headers = ['時間', '證件ID', '地點', '閘門', '方向', '狀態'];
     const rows = state.swipeHistory.map(r => [
-        r.timestamp,
-        r.badgeId,
-        r.siteId,
-        r.gateId,
-        r.direction,
-        r.status
+        r.timestamp, r.badgeId, r.siteId, r.gateId, r.direction, r.status
     ]);
 
-    // Create CSV
     let csv = headers.join(',') + '\n';
     rows.forEach(row => {
         csv += row.map(cell => `"${cell}"`).join(',') + '\n';
     });
 
-    // Download
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -232,22 +210,10 @@ function exportHistory() {
 
 // ============ REPORT FETCHING ============
 async function fetchReport() {
-    const jwtToken = document.getElementById('jwt-token').value.trim();
-
-    if (!jwtToken) {
-        alert('請輸入 JWT Token');
-        return;
-    }
-
     try {
-        const headers = {
-            'Authorization': `Bearer ${jwtToken}`,
-            'Content-Type': 'application/json'
-        };
-
-        const response = await fetch(`${state.reportUrl}/v1/reports/attendance`, {
+        const response = await fetch(`${getReportUrl()}/v1/reports/attendance`, {
             method: 'GET',
-            headers: headers
+            headers: { 'Content-Type': 'application/json' }
         });
 
         const data = await response.json();
@@ -273,12 +239,11 @@ function displayReport(reports) {
     responseBox.classList.add('success');
 
     if (!reports || reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty">沒有找到出席紀錄</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">沒有找到出席紀錄</td></tr>';
         statsBox.innerHTML = '<div class="stat-item"><div class="stat-item-value">0</div><div class="stat-item-label">總紀錄數</div></div>';
         return;
     }
 
-    // Calculate Stats
     const totalRecords = reports.length;
     const totalSwipes = reports.reduce((sum, r) => sum + r.swipe_count, 0);
     const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
@@ -298,7 +263,6 @@ function displayReport(reports) {
         </div>
     `;
 
-    // Render Table
     tbody.innerHTML = reports.map(report => `
         <tr>
             <td>${report.employee_id}</td>
@@ -308,6 +272,7 @@ function displayReport(reports) {
             <td>${formatTime(report.first_in)}</td>
             <td>${formatTime(report.last_out)}</td>
             <td><strong>${report.swipe_count}</strong></td>
+            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
         </tr>
     `).join('');
 
@@ -323,7 +288,7 @@ function displayReportError(message) {
     responseBox.classList.add('error');
 
     statsBox.innerHTML = `<div style="color: var(--danger); padding: 15px;">❌ 錯誤: ${message}</div>`;
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">無法載入報表</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">無法載入報表</td></tr>';
 
     responseBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -332,11 +297,6 @@ function displayReportError(message) {
 function saveSettings() {
     const apiUrl = document.getElementById('api-url').value.trim();
     const reportUrl = document.getElementById('report-url').value.trim();
-
-    if (!apiUrl || !reportUrl) {
-        alert('請輸入完整的 API 網址');
-        return;
-    }
 
     state.apiUrl = apiUrl;
     state.reportUrl = reportUrl;
@@ -360,15 +320,10 @@ async function testServerConnection() {
     connectionResult.classList.remove('hidden', 'success', 'error');
 
     try {
-        // Test Access API
-        const accessTest = await fetch(`${state.apiUrl}/healthz`, { method: 'GET' })
-            .then(r => r.ok)
-            .catch(() => false);
-
-        // Test Reporting API
-        const reportTest = await fetch(`${state.reportUrl}/healthz`, { method: 'GET' })
-            .then(r => r.ok)
-            .catch(() => false);
+        const accessTest = await fetch(`${getApiUrl()}/api/healthz`, { method: 'GET' })
+            .then(r => r.ok).catch(() => false);
+        const reportTest = await fetch(`${getReportUrl()}/api/report-healthz`, { method: 'GET' })
+            .then(r => r.ok).catch(() => false);
 
         const accessStatus = accessTest ? '✓ 連線成功' : '✗ 無法連接';
         const reportStatus = reportTest ? '✓ 連線成功' : '✗ 無法連接';
@@ -378,13 +333,9 @@ async function testServerConnection() {
         connectionContent.innerHTML = `
             <strong>Access API (Port 8080):</strong> ${accessStatus}<br>
             <strong>Reporting API (Port 8081):</strong> ${reportStatus}<br><br>
-            <small>確保後端微服務已啟動。執行以下命令：<br>
-            - go run ./cmd/access-api/main.go<br>
-            - go run ./cmd/reporting-api/main.go
-            </small>
+            <small>透過 Nginx 反向代理連接後端微服務</small>
         `;
 
-        // Update status indicator
         updateServerStatus(accessTest && reportTest);
 
     } catch (error) {
@@ -416,7 +367,7 @@ function formatTime(timeString) {
 
 // Periodically test connection every 30 seconds
 setInterval(() => {
-    fetch(`${state.apiUrl}/healthz`, { method: 'GET' })
+    fetch(`${getApiUrl()}/api/healthz`, { method: 'GET' })
         .then(r => updateServerStatus(r.ok))
         .catch(() => updateServerStatus(false));
 }, 30000);
