@@ -249,10 +249,3 @@ go run main.go
    curl http://localhost:8081/healthz
    ```
 
----
-
-**準備好開始測試了嗎？** 🎉
-
-選擇您的測試起點：
-- 🖥️ [前端測試](frontend/TESTING.md)
-- 🔧 [後端測試](backend/TESTING.md)

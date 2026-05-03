@@ -486,24 +486,3 @@ w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 ```
 
----
-
-## 🎓 學習路徑
-
-1. **基礎**：使用前端刷卡模擬器，理解反尾隨機制
-2. **中級**：查看後端日誌，理解事件處理流程
-3. **進階**：連接到資料庫，查看實際儲存的資料
-4. **專家**：部署到 Kubernetes，監控性能指標
-
----
-
-## 📞 支援
-
-有任何問題？檢查以下內容：
-
-1. **後端日誌**：查看三個終端機視窗的輸出
-2. **瀏覽器控制台**：按 F12 打開開發者工具，查看 JavaScript 錯誤
-3. **Network 標籤**：檢查 API 請求是否成功
-4. **docker-compose.yml**：驗證所有服務已啟動
-
-祝你使用愉快！🎉
