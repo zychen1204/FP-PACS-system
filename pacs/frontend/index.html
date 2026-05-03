@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PACS - 分散式門禁管理系統</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>🔐 PACS</h1>
+                <p>分散式實體門禁控制系統</p>
+            </div>
+            <div class="server-status">
+                <span id="status-indicator" class="status-dot offline"></span>
+                <span id="status-text">離線</span>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="swipe-tab">🔑 刷卡模擬</button>
+            <button class="tab-btn" data-tab="report-tab">📊 出席報表</button>
+            <button class="tab-btn" data-tab="settings-tab">⚙️ 設定</button>
+        </nav>
+
+        <!-- Tab Content -->
+        <main class="tabs-content">
+            <!-- 1. Swipe Simulator Tab -->
+            <section id="swipe-tab" class="tab-content active">
+                <div class="card">
+                    <h2>刷卡模擬器</h2>
+                    <p class="subtitle">模擬員工在閘門刷卡的行為</p>
+
+                    <div class="form-group">
+                        <label for="badge-id">員工證件 ID</label>
+                        <input type="text" id="badge-id" placeholder="例: B001" value="B001">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="site-id">地點</label>
+                        <select id="site-id">
+                            <option value="Site-A">Site-A (台積電 Fab12)</option>
+                            <option value="Site-B">Site-B (台積電 Fab15)</option>
+                            <option value="Site-C">Site-C (總部)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="gate-id">閘門 ID</label>
+                        <select id="gate-id">
+                            <option value="Gate-1">Gate-1</option>
+                            <option value="Gate-2">Gate-2</option>
+                            <option value="Gate-3">Gate-3</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="direction">方向</label>
+                        <div class="direction-buttons">
+                            <button id="btn-in" class="direction-btn in" data-direction="IN">
+                                ➡️ 進入
+                            </button>
+                            <button id="btn-out" class="direction-btn out" data-direction="OUT">
+                                ⬅️ 離開
+                            </button>
+                        </div>
+                        <input type="hidden" id="direction" value="IN">
+                    </div>
+
+                    <button id="btn-swipe" class="btn btn-primary">
+                        🔄 送出刷卡請求
+                    </button>
+
+                    <!-- Response Display -->
+                    <div id="swipe-response" class="response-box hidden">
+                        <h3>回應</h3>
+                        <div id="response-content"></div>
+                    </div>
+
+                    <!-- Swipe History -->
+                    <div id="swipe-history" class="history-box">
+                        <h3>刷卡紀錄</h3>
+                        <table id="history-table" class="table">
+                            <thead>
+                                <tr>
+                                    <th>時間</th>
+                                    <th>證件 ID</th>
+                                    <th>地點</th>
+                                    <th>方向</th>
+                                    <th>狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <tr class="empty"><td colspan="5">還沒有刷卡紀錄</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Reports Tab -->
+            <section id="report-tab" class="tab-content">
+                <div class="card">
+                    <h2>出席報表</h2>
+                    <p class="subtitle">查看員工出席紀錄（需要有效的 JWT Token）</p>
+
+                    <div class="form-group">
+                        <label for="jwt-token">JWT Token</label>
+                        <textarea id="jwt-token" placeholder="貼上你的 JWT token..." rows="3"></textarea>
+                        <small>用於認證報表查詢。如果沒有 Token，可以使用 Bearer token 格式。</small>
+                    </div>
+
+                    <button id="btn-fetch-report" class="btn btn-primary">
+                        📥 取得報表
+                    </button>
+
+                    <!-- Report Results -->
+                    <div id="report-response" class="response-box hidden">
+                        <h3>出席紀錄</h3>
+                        <div id="report-stats" class="stats-box"></div>
+                        <table id="report-table" class="table">
+                            <thead>
+                                <tr>
+                                    <th>員工 ID</th>
+                                    <th>姓名</th>
+                                    <th>組織</th>
+                                    <th>日期</th>
+                                    <th>進入時間</th>
+                                    <th>離開時間</th>
+                                    <th>刷卡次數</th>
+                                </tr>
+                            </thead>
+                            <tbody id="report-tbody">
+                                <tr class="empty"><td colspan="7">點擊「取得報表」以載入資料</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Settings Tab -->
+            <section id="settings-tab" class="tab-content">
+                <div class="card">
+                    <h2>連線設定</h2>
+                    <p class="subtitle">設定後端 API 伺服器位址</p>
+
+                    <div class="form-group">
+                        <label for="api-url">Access API 網址</label>
+                        <input type="url" id="api-url" placeholder="http://localhost:8080" value="http://localhost:8080">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="report-url">Reporting API 網址</label>
+                        <input type="url" id="report-url" placeholder="http://localhost:8081" value="http://localhost:8081">
+                    </div>
+
+                    <button id="btn-test-connection" class="btn btn-secondary">
+                        🔗 測試連線
+                    </button>
+
+                    <div id="connection-result" class="response-box hidden">
+                        <div id="connection-content"></div>
+                    </div>
+
+                    <hr>
+
+                    <h3>快速操作</h3>
+                    <button id="btn-clear-history" class="btn btn-warning">
+                        🗑️ 清除刷卡紀錄
+                    </button>
+                    <button id="btn-export-history" class="btn btn-info">
+                        📥 匯出紀錄 (CSV)
+                    </button>
+
+                    <hr>
+
+                    <h3>系統資訊</h3>
+                    <div class="info-box">
+                        <p><strong>版本:</strong> 1.0.0 Professional Cloud-Native Edition</p>
+                        <p><strong>後端架構:</strong> Go Microservices with PostgreSQL + Redis + Pub/Sub</p>
+                        <p><strong>前端框架:</strong> Vanilla HTML5/CSS3/JavaScript</p>
+                        <p><strong>部署方式:</strong> Docker + Kubernetes</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>© 2026 PACS Project - Cloud-Native Physical Access Control System</p>
+            <p>前端應用 v1.0 | 與後端微服務進行實時通訊</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
