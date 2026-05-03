@@ -37,7 +37,20 @@ INSERT INTO employees (badge_id, name, org_path) VALUES
 ON CONFLICT (badge_id) DO NOTHING;
 
 -- ============================================
--- IMMUTABLE AUDIT: Revoke UPDATE/DELETE on access_events
--- This ensures FR12 compliance (append-only)
+-- IMMUTABLE AUDIT: Enforce no UPDATE/DELETE via Trigger
+-- This ensures FR12 compliance even for the table owner
 -- ============================================
+CREATE OR REPLACE FUNCTION protect_audit_log()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Updates and deletes are not allowed on the access_events table (FR12 compliance)';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_protect_audit
+BEFORE UPDATE OR DELETE ON access_events
+FOR EACH STATEMENT
+EXECUTE FUNCTION protect_audit_log();
+
 REVOKE UPDATE, DELETE ON access_events FROM pacs_user;
+
