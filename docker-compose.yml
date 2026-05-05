@@ -9,16 +9,38 @@ services:
       POSTGRES_USER: pacs_user
       POSTGRES_PASSWORD: pacs_password
       POSTGRES_DB: pacs_db
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "log_min_duration_statement=100ms"
+      - "-c"
+      - "log_line_prefix=%t [%p]: db=%d,user=%u "
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pacs_user -d pacs_db"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - pacs-network
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ./scripts/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://pacs_user:pacs_password@postgres:5432/pacs_db?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
     networks:
       - pacs-network
 
@@ -72,6 +94,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - pacs-network
 
@@ -85,13 +109,15 @@ services:
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=pacs_user
-      - DB_PASSWORD=pacs_password
+      - DB_USER=pacs_reporter
+      - DB_PASSWORD=reporter_password
       - DB_NAME=pacs_db
       - PORT=8081
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - pacs-network
 
