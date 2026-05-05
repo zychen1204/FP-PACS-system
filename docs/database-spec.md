@@ -32,9 +32,9 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 | FR-3 | 拒絕原因回讀 | `access_events` 需有 `reason` 欄位記錄拒絕原因（Anti-Passback、Offline 等） |
 | FR-4 | 事件非同步持久化 | DB **不在 hot path**；event-processor 從 Redis Streams 消費後才寫入；DB 失效時事件留在 stream |
 | FR-5 | 個人出勤紀錄 | 每筆事件須含 `event_time` / `gate_id` / `direction`；`stay_hours` 由 reporting-api 用 IN/OUT 配對計算 |
-| FR-6 | 階層式組織報表（drill-down） | **Phase 1**：`employees.org_path` 字串路徑（如 `TSMC.Fab12.製造部`）支援 LIKE 前綴查詢 ／ **Phase 2**：升級為 closure table + materialized view |
+| FR-6 | 階層式組織報表（drill-down） | **Phase 1**：`employees.is_manager` 旗標 + `org_path` LIKE 前綴查詢（如 `TSMC.Fab12.製造部`）— 主管 scope 隱式定義為「`org_path` 等於或延伸自身路徑的所有 row」 ／ **Phase 2**：視效能改 closure table + materialized view |
 | FR-7 | 出勤趨勢報表 | **Phase 1**：reporting-api 即時 GROUP BY 聚合 ／ **Phase 2**：`mv_daily_attendance` materialized view，5 分鐘 refresh |
-| FR-9 | 階層式資料權限（manager 只看子樹） | reporting-api 層做 filter；DB 層只負責提供 `org_path` 欄位 |
+| FR-9 | 階層式資料權限（manager 只看子樹） | DB 層提供 `is_manager` + `org_path` 兩欄位（schema 支援 ✅）；filter logic 由 reporting-api 處理（範本：先 `WHERE badge_id=:caller AND is_manager=TRUE` 取 scope；空結果 → 403；非空 → `WHERE e.org_path = :scope OR e.org_path LIKE :scope \|\| '.%'`）|
 | FR-12 | 不可變更稽核（Immutable Audit） | 雙層保護：(a) `REVOKE UPDATE, DELETE ON access_events FROM pacs_user` (b) `BEFORE UPDATE OR DELETE` 與 `BEFORE TRUNCATE` trigger |
 | FR-13 | Audit 查詢（badge × 日期範圍） | 索引必須支援 `WHERE badge_id = ? AND event_date BETWEEN ? AND ?` 的高效查詢 |
 
@@ -58,8 +58,8 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 
 | 階段 | DAU | events/day | 年度資料量 | DB 配置 |
 |---|---|---|---|---|
-| Phase 1（試點 Fab12） | 1,000 | 6,000 | 210 MB | 單一 PostgreSQL 15、無 partitioning、`org_path` 字串 |
-| Phase 2（全廠） | 30,000 | 300,000 | 10 GB | 加上 read replica、按月 partitioning、closure table、`mv_daily_attendance` |
+| Phase 1（試點 Fab12） | 1,000 | 6,000 | 210 MB | 單一 PostgreSQL 15、無 partitioning、`org_path` + `is_manager` 撐 FR-6/9 |
+| Phase 2（全廠） | 30,000 | 300,000 | 10 GB | 加上 read replica、按月 partitioning、視需要改 closure table、`mv_daily_attendance` |
 | Phase 3（全球） | 90,000 | 1,080,000 | 40 GB | AlloyDB（區域內）+ BigQuery（全球分析） |
 
 當前實作對應 **Phase 1**。Phase 2 升級路徑寫在 [`scripts/README.md`](../scripts/README.md) 的
@@ -79,13 +79,17 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 - 索引組合
 - generated column / functional column 形式
 - 觀測工具（pg_stat_statements 已採用）
+- **組織樹編碼**：HW2 §5.2 字面寫 adjacency list（`parent_id` 自參照 + recursive CTE）；
+  本實作評估後採更輕的 **path enumeration（`org_path` dot-separated string）+ `is_manager` flag**
+  — 1k DAU 規模下 LIKE prefix B-tree range scan 比 recursive CTE 簡單且效能更好；
+  Phase 2 若組織深度 > 5 或 query 變複雜再轉 closure table。
 
 ## 6. Phase 2 升級預留（不在當前實作中）
 
 | 升級項 | 觸發條件 | 工程量 |
 |---|---|---|
 | 按月 partitioning（`access_events`） | 表大小 > 5 GB | 一次性 maintenance window，~30 min |
-| Closure table 取代 `org_path` 字串 | 真實組織深度 > 5 層 或 hierarchical query 大量出現 | 1 sprint |
+| Closure table 取代 `org_path` + `is_manager` | 真實組織深度 > 5 層 或 hierarchical query 大量出現（Phase 1 規模下 LIKE prefix 已足夠，Phase 2 視效能再決定） | 1 sprint |
 | `mv_daily_attendance` materialized view | reporting GROUP BY 開始拖累 P95 | 半 sprint |
 | Read replica | 報表 QPS 與寫入互相干擾 | infra 層改動 |
 

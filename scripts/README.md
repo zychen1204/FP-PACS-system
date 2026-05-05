@@ -8,21 +8,28 @@ are manual-load helpers for performance testing.
 scripts/
 ├── migrations/                                       versioned schema (single source of truth)
 │   ├── 0001_init_schema.{up,down}.sql                  consolidated baseline (tables, indexes, triggers, roles)
+│   ├── 0002_add_manager_flag.{up,down}.sql             FR-6/FR-9 schema gap: is_manager + 廠長/部員 seed
 │   └── 0099_dev_seed.{up,down}.sql                     ~45 demo rows tagged reason='[DEV_SEED]'
 └── fixtures/
     └── load_test.sql                                 10k events for one badge, used to verify NFR-2 with EXPLAIN ANALYZE
 ```
 
-## Why one baseline migration
+## Why baseline + 0002 (and not one merged file)
 
-Early-phase project. The schema is defined in a single `0001_init_schema`:
-tables, indexes, triggers, `REVOKE`, role grants, and seed employees
-all in one file. We only split a change into its own migration when:
+The schema is defined in a single `0001_init_schema` baseline (tables,
+indexes, triggers, `REVOKE`, role grants, and seed employees). We only
+split a change into its own migration when:
 
 - the change touches data already in production (additive `ALTER` vs
   table rebuild), or
+- the schema is already published (open PR / pushed branch) — folding
+  into the baseline file would force-push public history, or
 - the change is part of a Phase 2 upgrade (partitioning, closure
   table, materialised view) that must be staged for a planned window.
+
+`0002_add_manager_flag` falls under rule 2: `0001` was already on PR #1
+when the FR-6/FR-9 manager-identification gap was found, so the fix
+ships as a new file rather than an amendment.
 
 The `0099_dev_seed` slot stays separate because FR-12 immutability
 prevents its `down` from undoing INSERTs (resetting demo data requires
@@ -59,7 +66,7 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 
 ## Adding a new migration
 
-1. Pick the next free four-digit prefix (next is `0002`; the `0099_dev_seed`
+1. Pick the next free four-digit prefix (next is `0003`; the `0099_dev_seed`
    slot is reserved for the demo seed and must remain last).
 2. Create both files: `NNNN_short_description.up.sql` and `.down.sql`.
 3. The `up` file should be idempotent where reasonable (`IF NOT EXISTS`,
@@ -76,7 +83,8 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | Range       | Purpose |
 |-------------|---------|
 | `0001`      | consolidated baseline schema |
-| `0002-0098` | future schema changes (Phase 2 upgrades, ad-hoc additions) |
+| `0002`      | FR-6/FR-9 manager flag + extra demo employees |
+| `0003-0098` | future schema changes (Phase 2 upgrades, ad-hoc additions) |
 | `0099`      | dev seed (always last; only loaded in dev/demo) |
 
 ## Roles

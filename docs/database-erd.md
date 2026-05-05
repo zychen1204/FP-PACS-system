@@ -14,6 +14,7 @@ erDiagram
         varchar(100) name
         varchar(255) org_path        "Phase1: dot-separated path"
         boolean      is_active       "default TRUE"
+        boolean      is_manager      "default FALSE; FR-6/9 scope"
         timestamptz  created_at      "default NOW()"
         timestamptz  updated_at      "default NOW()"
     }
@@ -58,6 +59,7 @@ erDiagram
 | `name` | `VARCHAR(100)` | ✓ | - | - | 姓名 |
 | `org_path` | `VARCHAR(255)` | ✓ | `'TSMC'` | - | 組織路徑（dot-separated，如 `TSMC.Fab12.製造部`） |
 | `is_active` | `BOOLEAN` | ✓ | `TRUE` | - | 是否在職 |
+| `is_manager` | `BOOLEAN` | ✓ | `FALSE` | - | 主管旗標；TRUE 表示其 `org_path` 為 manager scope（FR-6/9）|
 | `created_at` | `TIMESTAMPTZ` | ✓ | `NOW()` | - | 建立時間 |
 | `updated_at` | `TIMESTAMPTZ` | ✓ | `NOW()` | - | 更新時間 |
 
@@ -95,6 +97,43 @@ server locale 會引發「日期歸屬」歧義。明確標註時區可避免此
 如果加 FK，event-processor 會收到 FK violation 而把事件丟回 DLQ，
 反而違反 FR-12 append-only 的精神。
 
+### 3.4 `is_manager` flag — 主管識別與 LIKE prefix scope（FR-6 / FR-9）
+
+`employees` 加 `is_manager BOOLEAN` 是 FR-6（階層團隊報表）與
+FR-9（階層資料權限）在 DB 層的支援。一個 manager 的 scope **隱式**定義為：
+
+> manager 的 `org_path` + 任何以該 path 為前綴的子路徑
+
+查詢樣板（pattern a，兩段式）：
+
+```sql
+-- Step 1: 驗證 caller 是主管 + 取 scope（backend 對空結果回 403）
+SELECT org_path FROM employees
+WHERE badge_id = $1 AND is_manager = TRUE AND is_active = TRUE;
+
+-- Step 2: 用 Step 1 的 path 過濾子樹
+SELECT ... FROM employees e ...
+WHERE e.org_path = $2 OR e.org_path LIKE $2 || '.%';
+```
+
+**為何用 path enumeration 而非 adjacency list（HW2 §5.2 字面選型）**：
+
+| 維度 | adjacency list（`parent_id` 自參照）| path enumeration（`org_path` 字串）|
+|---|---|---|
+| 查子樹 | recursive CTE，計畫不穩定 | B-tree LIKE prefix range scan |
+| Phase 1 1k DAU 規模 | 過度設計 | 簡單夠用 |
+| Cycle 風險 | 需要防護 | 無此問題 |
+| 直接知道「誰報告給誰」 | ✓ | ✗（但 spec 沒這需求）|
+
+評估後採 path enumeration + manager flag。Phase 2 規模若 reporting GROUP BY
+拖慢，再升 closure table（兩者並存過渡，最後 DROP `org_path`）。
+
+### 3.5 為何 `is_manager` 不另建 index
+
+只有 2 種值，選擇性過低；所有 manager-scope 查詢都是
+`WHERE badge_id = $1 AND is_manager = TRUE`，已走 `employees_pkey`。
+Index 反而增加寫入成本卻無 read 收益。
+
 ## 4. 索引清單
 
 所有索引都在 baseline migration `0001_init_schema` 中建立。
@@ -131,18 +170,18 @@ server locale 會引發「日期歸屬」歧義。明確標註時區可避免此
 
 ## 7. Migration 結構
 
-目前 Phase 1 是「兩個檔案就交付」的最小集合：
-
 ```
-0001_init_schema    ── 整合的 baseline：tables、indexes、triggers、REVOKE、pacs_reporter role、5 員工 seed
-0099_dev_seed       ── 45 筆 demo events（reason='[DEV_SEED]'）
+0001_init_schema         ── baseline：tables、indexes、triggers、REVOKE、pacs_reporter role、5 員工 seed
+0002_add_manager_flag    ── FR-6/9 schema gap：is_manager flag + 1 廠長 + 2 部員 seed
+0099_dev_seed            ── 45 筆 demo events（reason='[DEV_SEED]'）
 ```
 
-兩者都有對應 `.down.sql`，但 `0099_dev_seed.down.sql` 因 FR-12 immutability
-不允許 DELETE 而為 no-op；要重置 demo 資料請用 `docker compose down -v`。
+`0001` 與 `0002` 都有對應 `.down.sql`（0002 完全 reverse — DELETE 3 員工 + DROP COLUMN），
+但 `0099_dev_seed.down.sql` 因 FR-12 immutability 不允許 DELETE 而為 no-op；
+要重置 demo 資料請用 `docker compose down -v`。
 
 未來 Phase 2 升級（partitioning、closure table、materialised view）會以
-新 migration（`0002` 起）逐項加入而**不再回頭拆 baseline**。詳細工程規範：
+新 migration（`0003` 起）逐項加入而**不再回頭拆 baseline**。詳細工程規範：
 [`scripts/README.md`](../scripts/README.md)。
 
 ## 8. Phase 2 升級預留
@@ -150,7 +189,7 @@ server locale 會引發「日期歸屬」歧義。明確標註時區可避免此
 | 物件 | 何時加 | 怎麼加 | 影響 |
 |---|---|---|---|
 | `access_events` 按月 partitioning | 表 > 5 GB | 新 migration：建 partitioned 副本 → INSERT INTO ... SELECT → rename → 重掛 trigger | 一次性 maintenance window |
-| `org_relations` (closure table) | 組織深度 > 5 或 hierarchical query 變多 | 新表：`(ancestor_id, descendant_id, distance)` + 觸發器同步 | 與 `org_path` 並存過渡 |
+| `org_relations` (closure table) | 組織深度 > 5 或 hierarchical query 變多 — Phase 1 規模下 `is_manager` + `org_path` LIKE 已能 cover，**未必需要升級** | 新表：`(ancestor_id, descendant_id, distance)` + 觸發器同步 | 與 `org_path` 並存過渡，最後 DROP `org_path` 並改寫主管查詢 |
 | `mv_daily_attendance` | reporting P95 開始接近 200 ms | `CREATE MATERIALIZED VIEW ... REFRESH 5min` | reporting-api query 改指此 MV |
 
 操作 playbook：[`scripts/README.md`](../scripts/README.md) §"Phase 2 partitioning playbook"。

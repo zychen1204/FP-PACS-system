@@ -71,13 +71,20 @@ Schema 與 seed data 由 [golang-migrate](https://github.com/golang-migrate/migr
 | Table          | 用途                              | 寫入者              | 讀取者          |
 |----------------|-----------------------------------|---------------------|-----------------|
 | `access_events` | append-only 稽核日誌（FR-12 immutable） | `event-processor`   | `reporting-api` |
-| `employees`     | 員工主檔                          | (運維)              | `reporting-api` |
+| `employees`     | 員工主檔（含 `org_path` 部門路徑與 `is_manager` 主管旗標）| (運維)              | `reporting-api` |
+
+`employees.is_manager` 旗標 + `org_path` LIKE prefix 是 FR-6（階層團隊報表）
+與 FR-9（階層資料權限）的 DB 層支援；查詢樣板見
+[`docs/database-compliance.md`](docs/database-compliance.md) §FR-9。
 
 關鍵索引（baseline migration `0001`）：
 
 - `idx_events_status_date`：`(event_date, badge_id) WHERE status='SUCCESS'` — attendance 報表
 - `idx_events_badge_eventdate`：`(badge_id, event_date DESC)` — audit trail
 - `event_date` 是以 `Asia/Taipei` 時區計算的 STORED generated column
+
+`is_manager` 不另建 index — 只有 2 種值，選擇性過低，所有 manager-scope
+查詢都是 `WHERE badge_id = $1 AND is_manager = TRUE`，已走 `employees_pkey`。
 
 ### 角色分工（最小權限）
 

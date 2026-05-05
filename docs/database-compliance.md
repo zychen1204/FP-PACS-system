@@ -51,11 +51,13 @@
 | 項目 | 內容 |
 |---|---|
 | 規範 | manager 看子樹 drill-down |
-| 實作（P1） | `employees.org_path VARCHAR(255)` 字串路徑（如 `TSMC.Fab12.製造部`），可用 `LIKE 'TSMC.Fab12%'` 前綴查詢 |
-| 實作（P2 預留） | closure table `org_relations(ancestor_id, descendant_id, distance)` |
-| 驗證 | `psql -c "SELECT badge_id, name, org_path FROM employees ORDER BY badge_id;"` |
-| 實測結果 | <pre> badge_id \|  name  \|     org_path<br>----------+--------+-------------------<br> B001     \| 王小明 \| TSMC.Fab12.製造部<br> B002     \| 李大華 \| TSMC.Fab12.品保部<br> B003     \| 張美玲 \| TSMC.Fab15.研發部<br> B004     \| 陳志偉 \| TSMC.Fab15.設備部<br> B005     \| 林雅婷 \| TSMC.總部.人資部</pre>三層 dot-separated path（公司.廠區.部門）落地，可用 `org_path LIKE 'TSMC.Fab12%'` 做前綴 drill-down |
-| 階段 | **P1 ✅**（字串版） ／ **P2 deferred**（closure table） |
+| 實作（P1） | `employees.is_manager BOOLEAN`（migration `0002`）+ `org_path` LIKE prefix；manager scope 隱式定義為「`org_path` 等於或延伸自身路徑」|
+| 實作（P2 預留） | closure table `org_relations(ancestor_id, descendant_id, distance)` — Phase 2 視效能再決定 |
+| 驗證 | TESTING Step 12.1 / 12.2 / 12.3：列員工樹 → 廠長 B100 視野 → 部主管 B001 視野 |
+| 實測結果（12.1 員工樹）| <pre> badge_id \|  name  \|     org_path      \| is_manager<br>----------+--------+-------------------+------------<br> B100     \| 黃廠長 \| TSMC.Fab12        \| t<br> B002     \| 李大華 \| TSMC.Fab12.品保部 \| t<br> B001     \| 王小明 \| TSMC.Fab12.製造部 \| t<br> B011     \| 林員工 \| TSMC.Fab12.製造部 \| f<br> B012     \| 趙員工 \| TSMC.Fab12.製造部 \| f<br> B003     \| 張美玲 \| TSMC.Fab15.研發部 \| t<br> B004     \| 陳志偉 \| TSMC.Fab15.設備部 \| t<br> B005     \| 林雅婷 \| TSMC.總部.人資部  \| t<br>(8 rows)</pre>8 員工，6 主管 + 2 部員 |
+| 實測結果（12.2 廠長 B100 視野）| <pre>Manager scope: TSMC.Fab12<br> badge_id \|  name  \|     org_path      \| swipes<br>----------+--------+-------------------+--------<br> B100     \| 黃廠長 \| TSMC.Fab12        \|      0<br> B002     \| 李大華 \| TSMC.Fab12.品保部 \|      8<br> B001     \| 王小明 \| TSMC.Fab12.製造部 \|      8<br> B011     \| 林員工 \| TSMC.Fab12.製造部 \|      0<br> B012     \| 趙員工 \| TSMC.Fab12.製造部 \|      0<br>(5 rows)</pre>跨部門 drill-down 5 列；B011/B012 swipes=0 因新員工剛入職 |
+| 實測結果（12.3 部主管 B001 視野）| <pre>Manager scope: TSMC.Fab12.製造部<br> badge_id \|  name  \|     org_path<br>----------+--------+-------------------<br> B001     \| 王小明 \| TSMC.Fab12.製造部<br> B011     \| 林員工 \| TSMC.Fab12.製造部<br> B012     \| 趙員工 \| TSMC.Fab12.製造部<br>(3 rows)</pre>單部門範圍 3 列 |
+| 階段 | **P1 ✅ implemented**（`is_manager` + LIKE）／ **P2 optional**（closure table，視效能再升）|
 
 ### FR-7 出勤趨勢報表
 
@@ -72,11 +74,14 @@
 
 | 項目 | 內容 |
 |---|---|
-| 規範 | manager 只看 org tree 子節點 |
-| 實作 | DB 層提供 `org_path`；filter 由 reporting-api 處理 |
-| 驗證 | 不在 DB 層；spec 出處：HW2 §FR-9 標註 "API 過濾" |
-| 實測結果 | n/a — 不在 DB 範圍 |
-| 階段 | **DB 層支援 ✅**（提供 `org_path`）／ API filter 由 backend 負責 |
+| 規範 | manager 只看 org tree 子節點；跨部門查詢回 403 |
+| 實作（DB 層）| 提供 `is_manager` + `org_path` 兩欄位（migration `0001` + `0002`）— schema 完備 |
+| 實作（API 層）| reporting-api 採 pattern a 兩段式（DB 不直接 enforce session 身份，需要 OIDC token / session context，這由 API 層處理）|
+| Backend 實作範本（pattern a）| <pre>-- Step 1: 驗證 caller 是主管 + 取 scope<br>SELECT org_path FROM employees<br>WHERE badge_id = $1<br>  AND is_manager = TRUE<br>  AND is_active = TRUE;<br>-- 若回傳空 → backend 回 403 Forbidden<br><br>-- Step 2: 用 Step 1 的 path 過濾子樹<br>SELECT e.badge_id, e.name, e.org_path,<br>       MIN(ae.event_time) FILTER (WHERE ae.direction='IN')<br>         AS first_in,<br>       MAX(ae.event_time) FILTER (WHERE ae.direction='OUT')<br>         AS last_out,<br>       COUNT(*) FILTER (WHERE ae.status='SUCCESS')<br>         AS swipe_count<br>FROM employees e<br>LEFT JOIN access_events ae ON ae.badge_id = e.badge_id<br>WHERE (e.org_path = $2 OR e.org_path LIKE $2 \|\| '.%')<br>  AND ($3 IS NULL OR ae.event_date = $3)<br>GROUP BY e.badge_id, e.name, e.org_path<br>ORDER BY e.org_path, e.badge_id;</pre> |
+| 驗證（DB 層）| TESTING Step 12.2/12.3 證明 schema 提供的查詢能力；Step 1 對非主管應回空 |
+| 實測結果（FR-9 negative）| <pre>$ psql ... -c "SELECT org_path FROM employees<br>  WHERE badge_id = 'B011' AND is_manager = TRUE;"<br><br> org_path<br>----------<br>(0 rows)</pre>非主管 caller 取 scope 回空，backend 對此情境應回 403 |
+| 為何 DB 層不直接 enforce | DB 沒有「session 身份」概念（即使用 PG `current_user`，pacs_reporter 也是共用的）；身份驗證屬 API 層責任（OIDC token / JWT），DB 層只能提供 schema 與資料，不該也無法兜底 |
+| 階段 | **DB 層 ✅**（schema 完備）／ **API filter follow-up**（backend owner）|
 
 ### FR-12 不可變更稽核（**雙層保護**）
 
@@ -183,6 +188,30 @@
 | Read replica | 報表 QPS 干擾寫入 | infra 層 |
 | HA / 99.9% (NFR-3) | Phase 2 起 | infra 層 |
 | Encryption at rest (NFR-6) | production deployment | cloud provider |
+
+---
+
+## 4.5 Schema gap closure — FR-6 / FR-9（migration `0002`）
+
+PR #1 baseline 落地後深度核對 spec 發現，雖然 `org_path` 已能描述員工
+歸屬部門，但無法回答「誰是該部門的主管」— FR-6（drill-down）與
+FR-9（hierarchical filter）都需要 manager 識別。Migration `0002` 補一個
+BOOLEAN flag 與 demo 階層，schema 層完備。
+
+### 評估過但未採用的方案
+
+| 方案 | 為何不採 |
+|---|---|
+| `parent_badge_id` 自參照（HW2 §5.2 字面選型 adjacency list）| 1k DAU 規模下過度設計：需 self-FK + cycle 防護 + recursive CTE；LIKE prefix range scan 在 B-tree 上更直接更快 |
+| 純文件補解釋、不動 schema | FR-6/9 需要「誰是主管」資訊，沒有 flag 就無法 demo manager scope query |
+| 寫進 baseline 0001（amend）| `0001` 已 push 到 PR #1（`f51a35b`），改 baseline 等同 force-push 公開歷史，違反 git safety |
+
+### 採用方案的成本
+
+- 1 個 BOOLEAN 欄位，無 index（選擇性過低）
+- 3 個 INSERT（B100 廠長 + B011/B012 部員）讓階層查詢有實質範圍
+- 6 個 UPDATE 標 manager（B100 + B001~B005）
+- 0 個 backend 改動（per 用戶決策；FR-6/9 endpoint 屬後續 backend PR）
 
 ---
 
