@@ -1,0 +1,12 @@
+-- ============================================================
+-- 0099 dev_seed (down)
+-- access_events is FR-12 immutable: UPDATE/DELETE/TRUNCATE all
+-- raise. Rolling back this seed therefore requires a full reset:
+--
+--     docker compose down -v && docker compose up -d
+--
+-- This file is intentionally a no-op so `migrate down` succeeds
+-- bookkeeping-wise; the row data must be removed via the reset
+-- above. Re-running `up` after reset re-seeds cleanly.
+-- ============================================================
+SELECT 1;

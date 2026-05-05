@@ -187,18 +187,76 @@ pacs_swipe_total{status="rejected"} 1
 
 ## Step 9：驗證不可變更稽核 (FR12)
 
-```bash
-docker-compose exec postgres psql -U pacs_user -d pacs_db -c "DELETE FROM access_events WHERE id = 1;"
-```
+`access_events` 採雙層保護：`REVOKE UPDATE/DELETE` 角色權限 + `BEFORE UPDATE/DELETE/TRUNCATE` trigger。下列三項都應失敗：
 
-預期回應（應該失敗）：
-```
-ERROR: permission denied for table access_events
+```bash
+# 9.1 DELETE 應失敗（角色 REVOKE）
+docker compose exec postgres psql -U pacs_user -d pacs_db -c "DELETE FROM access_events WHERE id = 1;"
+# 預期：ERROR: permission denied for table access_events
+
+# 9.2 UPDATE 應失敗（角色 REVOKE 或 trigger）
+docker compose exec postgres psql -U pacs_user -d pacs_db -c "UPDATE access_events SET status='SUCCESS' WHERE id = 1;"
+# 預期：ERROR: permission denied for table access_events
+
+# 9.3 TRUNCATE 應失敗（statement-level trigger）
+docker compose exec postgres psql -U pacs_user -d pacs_db -c "TRUNCATE access_events;"
+# 預期：ERROR: Updates and deletes are not allowed on the access_events table (FR-12 compliance)
 ```
 
 ---
 
-## Step 10：停止服務
+## Step 10：驗證角色分離（最小權限）
+
+`pacs_reporter` 是 read-only role，提供給 reporting-api 使用：
+
+```bash
+# 10.1 reporter 可以 SELECT
+docker compose exec postgres psql -U pacs_reporter -d pacs_db -c "SELECT count(*) FROM access_events;"
+# 預期：count > 0
+
+# 10.2 reporter 不能 INSERT
+docker compose exec postgres psql -U pacs_reporter -d pacs_db \
+  -c "INSERT INTO access_events (badge_id, site_id, gate_id, direction, status) VALUES ('B999','S','G','IN','SUCCESS');"
+# 預期：ERROR: permission denied for table access_events
+```
+
+---
+
+## Step 11：驗證報表效能 (NFR-2 P95 < 200 ms)
+
+載入 fixture（10k 筆事件），用 EXPLAIN ANALYZE 確認 baseline `0001` 中為 NFR-2 設計的索引有被命中：
+
+```bash
+# 11.1 載入 fixture
+docker compose exec -T postgres psql -U pacs_user -d pacs_db < scripts/fixtures/load_test.sql
+
+# 11.2 attendance 查詢應走 idx_events_status_date
+docker compose exec postgres psql -U pacs_user -d pacs_db -c \
+  "EXPLAIN ANALYZE SELECT badge_id, count(*) FROM access_events
+   WHERE event_date = CURRENT_DATE AND status = 'SUCCESS' GROUP BY badge_id;"
+# 預期：plan 含 'Index Scan using idx_events_status_date'，total time < 200ms
+
+# 11.3 audit_trail 查詢應走 idx_events_badge_eventdate
+docker compose exec postgres psql -U pacs_user -d pacs_db -c \
+  "EXPLAIN ANALYZE SELECT * FROM access_events
+   WHERE badge_id='B001' AND event_date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE
+   ORDER BY event_time DESC LIMIT 100;"
+# 預期：plan 含 'Index Scan using idx_events_badge_eventdate'
+
+# 11.4 用 pg_stat_statements 看歷史 query 平均時間
+docker compose exec postgres psql -U pacs_user -d pacs_db -c \
+  "SELECT substring(query,1,80) AS q, calls, round(mean_exec_time::numeric,2) AS mean_ms
+   FROM pg_stat_statements WHERE query ILIKE 'SELECT%access_events%'
+   ORDER BY mean_exec_time DESC LIMIT 5;"
+```
+
+> 註：目前 `backend/internal/db/postgres.go` 的 query 仍用 `event_time::date`，
+> 不會直接命中新索引；待 backend owner 改寫為 `event_date` 後此 11.2 / 11.3
+> 的 EXPLAIN 會在現實 query 上呈現相同結果。
+
+---
+
+## Step 12：停止服務
 
 ```bash
 # 停止所有服務
