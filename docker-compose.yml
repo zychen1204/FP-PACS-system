@@ -1,14 +1,14 @@
-version: '3.8'
-
 services:
   # ─── Infrastructure ─────────────────────────────────
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: pacs_user
       POSTGRES_PASSWORD: pacs_password
       POSTGRES_DB: pacs_db
+      # UTF-8 locale 讓 ltree label 在 PG16 接受中文（FR-6 ltree migration 依賴）
+      LANG: C.UTF-8
     command:
       - "postgres"
       - "-c"
@@ -27,7 +27,15 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - pacs-network
+      pacs-network:
+        # Phase 2 §5.3「Read Replica」demo simplification：
+        # 本地 docker-compose 為簡化 demo，把 read 路徑指向同一 DB 並以
+        # network alias `postgres-replica` 對外暴露；正式環境會用 Cloud SQL
+        # HA Primary + Read Replica（streaming replication）。架構上保留
+        # 「reporting-api → postgres-replica」的拓樸，未來只要把 alias 換
+        # 成真正的 replica container 即可。
+        aliases:
+          - postgres-replica
 
   migrate:
     image: migrate/migrate:v4.17.1
@@ -107,12 +115,85 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - DB_HOST=postgres
+      # Phase 2 §5.3：read 路徑連 postgres-replica（demo 階段為 postgres alias）
+      - DB_HOST=postgres-replica
       - DB_PORT=5432
       - DB_USER=pacs_reporter
       - DB_PASSWORD=reporter_password
       - DB_NAME=pacs_db
       - PORT=8081
+      # FR-10：dev 環境 bypass JWT 讓 frontend 不需 token；
+      # 演示完整 OIDC 流程時改設 DEV_AUTH_BYPASS=0 並用 /v1/dev/login 換 token。
+      - DEV_AUTH_BYPASS=1
+      - JWT_SECRET=dev-only-not-for-prod-change-me-please
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - pacs-network
+
+  anomaly-detector:
+    build:
+      context: ./backend
+      args:
+        SERVICE: anomaly-detector
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=pacs_user
+      - DB_PASSWORD=pacs_password
+      - DB_NAME=pacs_db
+      - HEALTH_PORT=8083
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - pacs-network
+
+  mv-refresher:
+    build:
+      context: ./backend
+      args:
+        SERVICE: mv-refresher
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      # mv-refresher 是 MV 擁有者（pacs_user 在 migrate 階段建 MV），
+      # 用 pacs_user 才有權限 REFRESH。
+      - DB_USER=pacs_user
+      - DB_PASSWORD=pacs_password
+      - DB_NAME=pacs_db
+      - REFRESH_INTERVAL_SECONDS=300
+      - HEALTH_PORT=8084
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - pacs-network
+
+  org-sync:
+    build:
+      context: ./backend
+      args:
+        SERVICE: org-sync
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=pacs_user
+      - DB_PASSWORD=pacs_password
+      - DB_NAME=pacs_db
+      - SYNC_INTERVAL_SECONDS=1800
+      - HEALTH_PORT=8085
     depends_on:
       postgres:
         condition: service_healthy
