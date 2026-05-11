@@ -88,6 +88,8 @@ services:
       context: ./backend
       args:
         SERVICE: event-processor
+    ports:
+      - "8082:8082"
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -139,6 +141,8 @@ services:
       context: ./backend
       args:
         SERVICE: anomaly-detector
+    ports:
+      - "8083:8083"
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -163,6 +167,8 @@ services:
       context: ./backend
       args:
         SERVICE: mv-refresher
+    ports:
+      - "8084:8084"
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -186,6 +192,8 @@ services:
       context: ./backend
       args:
         SERVICE: org-sync
+    ports:
+      - "8085:8085"
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -199,6 +207,36 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    networks:
+      - pacs-network
+
+  # ─── Observability ──────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - access-api
+    networks:
+      - pacs-network
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/pacs-overview.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
     networks:
       - pacs-network
 
@@ -217,6 +255,7 @@ services:
 
 volumes:
   pgdata:
+  grafana-data:
 
 networks:
   pacs-network:

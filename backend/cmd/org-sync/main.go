@@ -71,9 +71,9 @@ func main() {
 	fmt.Println("✅ PostgreSQL connected")
 
 	intervalStr := envOrDefault("SYNC_INTERVAL_SECONDS", "1800")
-	intervalSec, _ := time.ParseDuration(intervalStr + "s")
-	if intervalSec < 30*time.Second {
-		intervalSec = 30 * time.Second
+	interval, _ := time.ParseDuration(intervalStr + "s")
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -91,9 +91,9 @@ func main() {
 	// 啟動時做一次完整 sync，之後依 interval 跑
 	sync(ctx, db)
 
-	t := time.NewTicker(intervalSec)
+	t := time.NewTicker(interval)
 	defer t.Stop()
-	fmt.Printf("⏱ syncing every %s\n", intervalSec)
+	fmt.Printf("⏱ syncing every %s\n", interval)
 	for {
 		select {
 		case <-ctx.Done():

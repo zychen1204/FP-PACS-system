@@ -39,7 +39,7 @@ func main() {
 		fmt.Printf("❌ PostgreSQL connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	fmt.Println("✅ PostgreSQL connected")
 
 	eventStream, err = queue.NewRedisStream()
@@ -47,14 +47,14 @@ func main() {
 		fmt.Printf("❌ Redis Stream connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer eventStream.Close()
+	defer func() { _ = eventStream.Close() }()
 	fmt.Println("✅ Redis Stream connected")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := eventStream.CreateConsumerGroup(ctx); err != nil {
-		fmt.Printf("⚠️ Consumer group warning: %v\n", err)
+	if cerr := eventStream.CreateConsumerGroup(ctx); cerr != nil {
+		fmt.Printf("⚠️ Consumer group warning: %v\n", cerr)
 	}
 	fmt.Println("✅ Consumer group ready")
 
@@ -74,9 +74,9 @@ func main() {
 
 	hostname, _ := os.Hostname()
 	err = eventStream.ConsumeEvents(ctx, fmt.Sprintf("processor-%s", hostname), func(event models.AccessEvent) error {
-		if err := database.InsertEvent(ctx, event); err != nil {
+		if dbErr := database.InsertEvent(ctx, event); dbErr != nil {
 			atomic.AddInt64(&errCount, 1)
-			return fmt.Errorf("DB insert failed: %w", err)
+			return fmt.Errorf("DB insert failed: %w", dbErr)
 		}
 		atomic.AddInt64(&processed, 1)
 		fmt.Printf("[PERSISTED] %s %s at %s (%s)\n", event.BadgeID, event.Direction, event.SiteID, event.Status)
@@ -103,7 +103,9 @@ func runHealthServer() {
 
 	port := envOrDefault("HEALTH_PORT", "8082")
 	fmt.Printf("📡 Health endpoint on :%s\n", port)
-	r.Run(":" + port)
+	if err := r.Run(":" + port); err != nil {
+		fmt.Printf("❌ Health server error: %v\n", err)
+	}
 }
 
 func envOrDefault(key, fallback string) string {

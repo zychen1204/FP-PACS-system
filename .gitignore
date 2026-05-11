@@ -1,11 +1,14 @@
 # macOS
 .DS_Store
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code local settings and memory
+.claude/
 
 # Course spec PDFs (large, already distilled into docs/)
 *.pdf
+
+# Go installation tarballs
+*.tar.gz
 
 # Go build artifacts
 *.exe

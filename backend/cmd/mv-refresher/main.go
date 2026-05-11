@@ -65,9 +65,9 @@ func main() {
 	fmt.Println("✅ PostgreSQL connected")
 
 	intervalStr := envOrDefault("REFRESH_INTERVAL_SECONDS", "300")
-	intervalSec, _ := time.ParseDuration(intervalStr + "s")
-	if intervalSec < 10*time.Second {
-		intervalSec = 10 * time.Second
+	interval, _ := time.ParseDuration(intervalStr + "s")
+	if interval < 10*time.Second {
+		interval = 10 * time.Second
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,9 +85,9 @@ func main() {
 	// 啟動時先 refresh 一次
 	refresh(ctx, db)
 
-	t := time.NewTicker(intervalSec)
+	t := time.NewTicker(interval)
 	defer t.Stop()
-	fmt.Printf("⏱ refreshing every %s\n", intervalSec)
+	fmt.Printf("⏱ refreshing every %s\n", interval)
 	for {
 		select {
 		case <-ctx.Done():
