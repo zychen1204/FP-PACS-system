@@ -233,7 +233,6 @@ func (p *PostgresDB) QueryAttendanceTrend(ctx context.Context, period, scope, st
 	if endDate != "" {
 		query += fmt.Sprintf(" AND event_date <= $%d", idx)
 		args = append(args, endDate)
-		idx++
 	}
 	query += " GROUP BY 1 ORDER BY 1 DESC"
 

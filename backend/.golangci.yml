@@ -1,0 +1,58 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      # Exclude idiomatic defer-close and test-helper patterns
+      exclude-functions:
+        # SQL cursor / connection cleanup in defer — error not actionable
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        # Defer rollback is a guard after a successful Commit; the error is expected
+        - (*database/sql.Tx).Rollback
+        # Encoding helpers used in test assertions — failures cause obvious nil-pointer panics
+        - encoding/json.Unmarshal
+        - (*encoding/json.Decoder).Decode
+        # os.Setenv in TestMain (no *testing.T available, so t.Setenv cannot be used)
+        - os.Setenv
+    govet:
+      enable:
+        - shadow
+    misspell:
+      locale: US
+
+issues:
+  exclude-rules:
+    # Test files: .Close() on Redis/custom types in cleanup helpers is acceptable
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+    # Internal packages: exported identifiers used by cmd packages, not "unused"
+    - path: "internal/"
+      linters:
+        - unused
+
+  exclude:
+    # Defer .Close() on application objects (Redis, excelize, custom wrappers) is idiomatic cleanup
+    - "Error return value of .*\\.Close.* is not checked"
+    # govet shadow on err in short if-init blocks is low-signal noise
+    - "declaration of .err. shadows declaration"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly

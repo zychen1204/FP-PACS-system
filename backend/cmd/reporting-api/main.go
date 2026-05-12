@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	database  *db.PostgresDB
+	database  Reporter // *db.PostgresDB in production; mockDB in tests
 	startTime = time.Now()
 )
 
@@ -37,7 +37,7 @@ func main() {
 		fmt.Printf("❌ PostgreSQL connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	fmt.Println("✅ PostgreSQL connected")
 
 	gin.SetMode(gin.ReleaseMode)
@@ -83,7 +83,9 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	if err := srv.Shutdown(ctx); err != nil {
+		fmt.Printf("❌ Shutdown error: %v\n", err)
+	}
 }
 
 func getAttendanceReport(c *gin.Context) {
@@ -205,7 +207,7 @@ func exportAttendance(c *gin.Context) {
 	}
 
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sheet := "Attendance"
 	idx, _ := f.NewSheet(sheet)
 	f.SetActiveSheet(idx)

@@ -39,7 +39,7 @@ func main() {
 		fmt.Printf("❌ Redis connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer redisCache.Close()
+	defer func() { _ = redisCache.Close() }()
 	fmt.Println("✅ Redis cache connected")
 
 	eventStream, err = queue.NewRedisStream()
@@ -47,7 +47,7 @@ func main() {
 		fmt.Printf("❌ Redis Stream connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer eventStream.Close()
+	defer func() { _ = eventStream.Close() }()
 	fmt.Println("✅ Redis Stream connected")
 
 	gin.SetMode(gin.ReleaseMode)
@@ -77,7 +77,9 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	if err := srv.Shutdown(ctx); err != nil {
+		fmt.Printf("❌ Shutdown error: %v\n", err)
+	}
 }
 
 func handleSwipe(c *gin.Context) {
@@ -93,11 +95,17 @@ func handleSwipe(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// Check anti-passback via Redis cache (FR2)
+	// Check anti-passback via Redis cache (FR-2).
+	// Fail-closed per design doc §5.2: Redis unavailable → 503, never bypass APB.
 	allowed, err := redisCache.CheckAntiPassback(ctx, req.SiteID, req.BadgeID, req.Direction)
 	if err != nil {
-		fmt.Printf("[WARN] Redis error, fail-open: %v\n", err)
-		allowed = true // Fail-open for availability (NFR3)
+		fmt.Printf("[WARN] Redis unavailable, fail-closed: %v\n", err)
+		c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
+			Status:    "ERROR",
+			Message:   "Access control unavailable, please retry",
+			ErrorCode: "ERR_SYSTEM_UNAVAILABLE",
+		})
+		return
 	}
 
 	event := models.AccessEvent{
@@ -114,7 +122,11 @@ func handleSwipe(c *gin.Context) {
 		atomic.AddInt64(&swipeFail, 1)
 
 		// Async persist via Message Queue (FR4)
-		go eventStream.PublishEvent(context.Background(), event)
+		go func(e models.AccessEvent) {
+			if pubErr := eventStream.PublishEvent(context.Background(), e); pubErr != nil {
+				fmt.Printf("[WARN] PublishEvent failed: %v\n", pubErr)
+			}
+		}(event)
 
 		fmt.Printf("[REJECTED] APB violation: %s at %s\n", req.BadgeID, req.SiteID)
 		c.JSON(http.StatusForbidden, models.SwipeResponse{
@@ -134,7 +146,11 @@ func handleSwipe(c *gin.Context) {
 	atomic.AddInt64(&swipeOK, 1)
 
 	// Async persist via Message Queue (FR4)
-	go eventStream.PublishEvent(context.Background(), event)
+	go func(e models.AccessEvent) {
+		if pubErr := eventStream.PublishEvent(context.Background(), e); pubErr != nil {
+			fmt.Printf("[WARN] PublishEvent failed: %v\n", pubErr)
+		}
+	}(event)
 
 	fmt.Printf("[SUCCESS] %s %s at %s/%s\n", req.BadgeID, req.Direction, req.SiteID, req.GateID)
 	c.JSON(http.StatusOK, models.SwipeResponse{

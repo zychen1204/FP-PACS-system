@@ -66,7 +66,7 @@ func main() {
 		fmt.Printf("❌ PostgreSQL connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	fmt.Println("✅ PostgreSQL connected")
 
 	eventStream, err = queue.NewRedisStream()
@@ -74,14 +74,14 @@ func main() {
 		fmt.Printf("❌ Redis Stream connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer eventStream.Close()
+	defer func() { _ = eventStream.Close() }()
 	fmt.Println("✅ Redis Stream connected")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := eventStream.CreateNamedConsumerGroup(ctx, consumerGroup); err != nil {
-		fmt.Printf("⚠️ Consumer group warning: %v\n", err)
+	if cerr := eventStream.CreateNamedConsumerGroup(ctx, consumerGroup); cerr != nil {
+		fmt.Printf("⚠️ Consumer group warning: %v\n", cerr)
 	}
 
 	go runHealthServer()
