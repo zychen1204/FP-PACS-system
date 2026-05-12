@@ -2,9 +2,12 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
+
+	"pacs/backend/internal/models"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -76,6 +79,26 @@ func (r *RedisCache) CheckAntiPassback(ctx context.Context, siteID, badgeID, dir
 func (r *RedisCache) SetDirection(ctx context.Context, siteID, badgeID, direction string) error {
 	key := fmt.Sprintf("apb:%s:%s", siteID, badgeID)
 	return r.client.Set(ctx, key, direction, 24*time.Hour).Err()
+}
+
+// SetDirectionAndPublishEvent atomically updates APB state and appends the
+// access event to the Redis Stream. This keeps the success response from
+// observing a half-written Redis state.
+func (r *RedisCache) SetDirectionAndPublishEvent(ctx context.Context, siteID, badgeID, direction, streamName string, event models.AccessEvent) error {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("apb:%s:%s", siteID, badgeID)
+	pipe := r.client.TxPipeline()
+	pipe.Set(ctx, key, direction, 24*time.Hour)
+	pipe.XAdd(ctx, &redis.XAddArgs{
+		Stream: streamName,
+		Values: map[string]interface{}{"data": string(data)},
+	})
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // Close closes the Redis connection

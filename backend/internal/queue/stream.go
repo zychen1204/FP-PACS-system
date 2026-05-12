@@ -19,7 +19,12 @@ const (
 	// MaxRetries: handler 連續失敗達此次數後該則消息進 DLQ 並 XACK 主 stream。
 	// HW2 §5.3 列為 Pub/Sub + DLQ Phase 2 升級項。
 	MaxRetries = 3
+	// PendingClaimBatch bounds each XAUTOCLAIM pass so a large pending list
+	// cannot starve new stream reads.
+	PendingClaimBatch = 10
 )
+
+var pendingMinIdle = 30 * time.Second
 
 // RedisStream handles event publishing and consuming via Redis Streams
 type RedisStream struct {
@@ -98,17 +103,18 @@ func (s *RedisStream) ConsumeEvents(ctx context.Context, consumerName string, ha
 // pacs:events:dead（含 original_id / error / consumer / failed_at）並 XACK
 // 主 stream，避免無限重試卡住消費。
 //
-// 重試計數採用 in-memory map（key=msg.ID）。XREADGROUP `>` 只回覆未投遞給該
-// consumer 的訊息；若 handler 回 error 不 XACK，下一輪 `>` 不會再回同一則，
-// 必須走 XAUTOCLAIM/XPENDING 才會重投遞。本實作對 retry 採「同一輪 in-place
-// retry up to MaxRetries 次」的簡化版（與真實 Pub/Sub backoff 不同，但對 demo
-// 足以驗證 DLQ 行為）。
+// 每輪先用 XAUTOCLAIM 回收 idle pending messages，再用 XREADGROUP `>` 讀新訊息。
+// 這可避免 consumer crash 後，已投遞但未 ACK 的消息永久卡在 PEL。
 func (s *RedisStream) ConsumeEventsWithGroup(ctx context.Context, group, consumerName string, handler func(event models.AccessEvent) error) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		if err := s.claimPending(ctx, group, consumerName, handler); err != nil {
+			fmt.Printf("[STREAM] Pending claim error: %v\n", err)
 		}
 
 		streams, err := s.client.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -130,40 +136,75 @@ func (s *RedisStream) ConsumeEventsWithGroup(ctx context.Context, group, consume
 
 		for _, stream := range streams {
 			for _, msg := range stream.Messages {
-				data, ok := msg.Values["data"].(string)
-				if !ok {
-					continue
-				}
-
-				var event models.AccessEvent
-				if err := json.Unmarshal([]byte(data), &event); err != nil {
-					fmt.Printf("[STREAM] Unmarshal error: %v — sending to DLQ\n", err)
-					s.toDLQ(ctx, msg.ID, data, err, consumerName)
-					s.client.XAck(ctx, StreamName, group, msg.ID)
-					continue
-				}
-
-				var lastErr error
-				for attempt := 0; attempt < MaxRetries; attempt++ {
-					if err := handler(event); err == nil {
-						lastErr = nil
-						break
-					} else {
-						lastErr = err
-						fmt.Printf("[STREAM] Handler error attempt %d/%d: %v\n", attempt+1, MaxRetries, err)
-						time.Sleep(500 * time.Millisecond)
-					}
-				}
-
-				if lastErr != nil {
-					fmt.Printf("[STREAM] Exhausted retries; sending to DLQ\n")
-					s.toDLQ(ctx, msg.ID, data, lastErr, consumerName)
-				}
-				// 不論 success 或 DLQ 都 ACK 主 stream，避免無限重投
-				s.client.XAck(ctx, StreamName, group, msg.ID)
+				s.handleMessage(ctx, group, consumerName, msg, handler)
 			}
 		}
 	}
+}
+
+func (s *RedisStream) claimPending(ctx context.Context, group, consumerName string, handler func(event models.AccessEvent) error) error {
+	start := "0-0"
+	for {
+		messages, next, err := s.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream:   StreamName,
+			Group:    group,
+			Consumer: consumerName,
+			MinIdle:  pendingMinIdle,
+			Start:    start,
+			Count:    PendingClaimBatch,
+		}).Result()
+		if err != nil {
+			if err == redis.Nil {
+				return nil
+			}
+			return err
+		}
+		for _, msg := range messages {
+			s.handleMessage(ctx, group, consumerName, msg, handler)
+		}
+		if len(messages) < PendingClaimBatch || next == "" || next == start {
+			return nil
+		}
+		start = next
+	}
+}
+
+func (s *RedisStream) handleMessage(ctx context.Context, group, consumerName string, msg redis.XMessage, handler func(event models.AccessEvent) error) {
+	data, ok := msg.Values["data"].(string)
+	if !ok {
+		err := fmt.Errorf("stream message missing string data field")
+		fmt.Printf("[STREAM] Invalid message: %v — sending to DLQ\n", err)
+		s.toDLQ(ctx, msg.ID, "", err, consumerName)
+		s.client.XAck(ctx, StreamName, group, msg.ID)
+		return
+	}
+
+	var event models.AccessEvent
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		fmt.Printf("[STREAM] Unmarshal error: %v — sending to DLQ\n", err)
+		s.toDLQ(ctx, msg.ID, data, err, consumerName)
+		s.client.XAck(ctx, StreamName, group, msg.ID)
+		return
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < MaxRetries; attempt++ {
+		if err := handler(event); err == nil {
+			lastErr = nil
+			break
+		} else {
+			lastErr = err
+			fmt.Printf("[STREAM] Handler error attempt %d/%d: %v\n", attempt+1, MaxRetries, err)
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	if lastErr != nil {
+		fmt.Printf("[STREAM] Exhausted retries; sending to DLQ\n")
+		s.toDLQ(ctx, msg.ID, data, lastErr, consumerName)
+	}
+	// 不論 success 或 DLQ 都 ACK 主 stream，避免無限重投
+	s.client.XAck(ctx, StreamName, group, msg.ID)
 }
 
 // toDLQ pushes a failed message to pacs:events:dead with diagnostic metadata.

@@ -226,3 +226,50 @@ func TestConsumeEventsWithGroup_SuccessfulMessage_NotInDLQ(t *testing.T) {
 		t.Error("successful message should NOT be sent to DLQ")
 	}
 }
+
+func TestConsumeEventsWithGroup_ReclaimsPendingMessage(t *testing.T) {
+	s, rc := newTestStream(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	oldPendingMinIdle := pendingMinIdle
+	pendingMinIdle = time.Millisecond
+	t.Cleanup(func() { pendingMinIdle = oldPendingMinIdle })
+
+	group := "claim-group"
+	if err := s.CreateNamedConsumerGroup(ctx, group); err != nil {
+		t.Fatalf("CreateNamedConsumerGroup: %v", err)
+	}
+	if err := s.PublishEvent(ctx, testEvent("CLAIM_BADGE")); err != nil {
+		t.Fatalf("PublishEvent: %v", err)
+	}
+
+	// Simulate a crashed consumer: read the message into the PEL without ACK.
+	_, err := rc.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    group,
+		Consumer: "consumer-crashed",
+		Streams:  []string{StreamName, ">"},
+		Count:    1,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XReadGroup seed pending: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	received := make(chan models.AccessEvent, 1)
+	go func() {
+		_ = s.ConsumeEventsWithGroup(ctx, group, "consumer-reclaimer", func(e models.AccessEvent) error {
+			received <- e
+			return nil
+		})
+	}()
+
+	select {
+	case e := <-received:
+		if e.BadgeID != "CLAIM_BADGE" {
+			t.Errorf("badge_id got=%q want=CLAIM_BADGE", e.BadgeID)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out: pending event was not reclaimed")
+	}
+}

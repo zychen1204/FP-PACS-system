@@ -121,12 +121,9 @@ func handleSwipe(c *gin.Context) {
 		event.Reason = "Anti-Passback Violation"
 		atomic.AddInt64(&swipeFail, 1)
 
-		// Async persist via Message Queue (FR4)
-		go func(e models.AccessEvent) {
-			if pubErr := eventStream.PublishEvent(context.Background(), e); pubErr != nil {
-				fmt.Printf("[WARN] PublishEvent failed: %v\n", pubErr)
-			}
-		}(event)
+		if !publishSwipeEvent(c, event) {
+			return
+		}
 
 		fmt.Printf("[REJECTED] APB violation: %s at %s\n", req.BadgeID, req.SiteID)
 		c.JSON(http.StatusForbidden, models.SwipeResponse{
@@ -137,26 +134,50 @@ func handleSwipe(c *gin.Context) {
 		return
 	}
 
-	// Update APB state in cache
-	if err := redisCache.SetDirection(ctx, req.SiteID, req.BadgeID, req.Direction); err != nil {
-		fmt.Printf("[WARN] Failed to update APB state: %v\n", err)
-	}
-
 	event.Status = "SUCCESS"
-	atomic.AddInt64(&swipeOK, 1)
 
-	// Async persist via Message Queue (FR4)
-	go func(e models.AccessEvent) {
-		if pubErr := eventStream.PublishEvent(context.Background(), e); pubErr != nil {
-			fmt.Printf("[WARN] PublishEvent failed: %v\n", pubErr)
-		}
-	}(event)
+	if !commitSuccessfulSwipe(c, event) {
+		return
+	}
+	atomic.AddInt64(&swipeOK, 1)
 
 	fmt.Printf("[SUCCESS] %s %s at %s/%s\n", req.BadgeID, req.Direction, req.SiteID, req.GateID)
 	c.JSON(http.StatusOK, models.SwipeResponse{
 		Status:  "SUCCESS",
 		Message: "Access granted",
 	})
+}
+
+func publishSwipeEvent(c *gin.Context, event models.AccessEvent) bool {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := eventStream.PublishEvent(ctx, event); err != nil {
+		fmt.Printf("[WARN] PublishEvent failed, fail-closed: %v\n", err)
+		c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
+			Status:    "ERROR",
+			Message:   "Access control unavailable, please retry",
+			ErrorCode: "ERR_SYSTEM_UNAVAILABLE",
+		})
+		return false
+	}
+	return true
+}
+
+func commitSuccessfulSwipe(c *gin.Context, event models.AccessEvent) bool {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := redisCache.SetDirectionAndPublishEvent(ctx, event.SiteID, event.BadgeID, event.Direction, queue.StreamName, event); err != nil {
+		fmt.Printf("[WARN] Failed to commit APB state and event, fail-closed: %v\n", err)
+		c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
+			Status:    "ERROR",
+			Message:   "Access control unavailable, please retry",
+			ErrorCode: "ERR_SYSTEM_UNAVAILABLE",
+		})
+		return false
+	}
+	return true
 }
 
 func healthCheck(c *gin.Context) {
