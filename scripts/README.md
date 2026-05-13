@@ -4,7 +4,7 @@ Database build artefacts for PACS. PostgreSQL 16 schema is managed via
 [golang-migrate](https://github.com/golang-migrate/migrate); fixtures
 are manual-load helpers for performance testing.
 
-> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0099）。
+> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0100~0101 + 0099）。
 > 設計脈絡見 [`../docs/PHASE2_CHANGES.md`](../docs/PHASE2_CHANGES.md)。
 
 ```
@@ -16,10 +16,19 @@ scripts/
 │   ├── 0004_alerts_table.{up,down}.sql                         Phase 2: FR-11 alerts table (CHECK 列舉 + 索引)
 │   ├── 0005_partition_access_events.{up,down}.sql              Phase 2: access_events RANGE-partition by month (36 個月)
 │   ├── 0006_mv_daily_attendance.{up,down}.sql                  Phase 2: materialized view + UNIQUE + GiST 索引
+│   ├── 0100_protect_access_event_partitions.{up,down}.sql      Phase 2 hardening: FR-12 trigger 擴到每個子 partition
+│   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition() function
 │   └── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
 └── fixtures/
     └── load_test.sql                                           10k events fixture for NFR-2 EXPLAIN ANALYZE
 ```
+
+> 註：golang-migrate 依整數版本號排序，實際執行順序為
+> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101`，
+> 因此 `0099_dev_seed` 不再是最後一支（被 0100/0101 hardening migration 接在後面）。
+> 0100/0101 是 schema-only（CREATE FUNCTION / CREATE TRIGGER / ATTACH default partition），
+> 不依賴 dev_seed 資料，跑在 dev_seed 之後完全安全。日後若想保留「dev_seed 永遠最後」
+> 的慣例，可考慮把 dev_seed 改 `9999_dev_seed.sql`。
 
 ## Why split into separate migrations (vs. one merged file)
 
@@ -77,8 +86,8 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 
 ## Adding a new migration
 
-1. Pick the next free four-digit prefix（next available 是 `0007`；
-   `0099_dev_seed` 永遠保留最後）。
+1. Pick the next free four-digit prefix（已使用至 `0006` + `0100`/`0101`；
+   next available 是 `0007` 或 `0102`，看是 Phase 2 完工項目還是後續 hardening）。
 2. Create both files: `NNNN_short_description.up.sql` and `.down.sql`。
 3. `up` 檔在合理範圍內 idempotent（`IF NOT EXISTS`、`CREATE OR REPLACE`、
    `DROP ... IF EXISTS`）；`down` 檔應精確 undo `up`，除非被 FR-12 immutability 阻擋。
@@ -99,7 +108,10 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | `0005` | Phase 2 access_events partition by month |
 | `0006` | Phase 2 mv_daily_attendance materialized view |
 | `0007-0098` | future schema changes（Phase 3 升級、ad-hoc additions） |
-| `0099` | dev seed（always last；only loaded in dev/demo） |
+| `0099` | dev seed（only loaded in dev/demo；不再嚴格保證最後）|
+| `0100` | Phase 2 hardening：FR-12 trigger 擴到每個子 partition |
+| `0101` | Phase 2 hardening：default partition + `ensure_access_event_partition()` 預建函式 |
+| `0102+` | future hardening / Phase 3 schema 改動 |
 
 ## Roles
 
