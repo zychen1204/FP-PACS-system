@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PACS Frontend - Test Runner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Monaco', 'Courier New', monospace;
+            background: linear-gradient(135deg, #0f172a 0%, #1a2332 100%);
+            color: #f1f5f9;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 12px;
+            border-left: 4px solid #1e40af;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #3b82f6;
+        }
+
+        .header p {
+            color: #cbd5e1;
+            font-size: 14px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1e40af, #0891b2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(30, 64, 175, 0.3);
+        }
+
+        .btn-secondary {
+            background: rgba(65, 105, 225, 0.2);
+            color: #60a5fa;
+            border: 1px solid #60a5fa;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(65, 105, 225, 0.3);
+        }
+
+        .test-output {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #475569;
+            border-radius: 8px;
+            padding: 20px;
+            font-size: 13px;
+            overflow-y: auto;
+            max-height: 600px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .test-output:empty::before {
+            content: 'Test output will appear here...';
+            color: #64748b;
+        }
+
+        .pass {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .fail {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .info {
+            color: #60a5fa;
+        }
+
+        .summary {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 8px;
+            border-left: 4px solid #10b981;
+        }
+
+        .summary h3 {
+            color: #3b82f6;
+            margin-bottom: 10px;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat {
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            border-left: 3px solid #1e40af;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 5px;
+            text-transform: uppercase;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #475569;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .test-suite {
+            margin-bottom: 30px;
+        }
+
+        .suite-name {
+            color: #60a5fa;
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .test-case {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .test-output {
+                font-size: 11px;
+                max-height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 PACS Frontend Test Suite</h1>
+            <p>Complete testing coverage for PACS frontend system</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="runTestsFromButton()">
+                <span class="spinner" id="spinner" style="display: none; margin-right: 8px;"></span>
+                <span id="run-text">▶️ Run All Tests</span>
+            </button>
+            <button class="btn btn-secondary" onclick="clearOutput()">🗑️ Clear Output</button>
+            <button class="btn btn-secondary" onclick="downloadReport()">📥 Download Report</button>
+        </div>
+
+        <div class="test-output" id="output"></div>
+
+        <div class="summary" id="summary" style="display: none;">
+            <h3>📊 Test Summary</h3>
+            <div class="summary-stats">
+                <div class="stat">
+                    <div class="stat-value" id="total-tests">0</div>
+                    <div class="stat-label">Total Tests</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" style="color: #10b981;" id="passed-tests">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" style="color: #ef4444;" id="failed-tests">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" style="color: #f59e0b;" id="pass-rate">0%</div>
+                    <div class="stat-label">Pass Rate</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="tests.js"></script>
+    <script>
+        const output = document.getElementById('output');
+        let testResults = { total: 0, passed: 0, failed: 0 };
+
+        // Override console methods
+        const originalLog = console.log;
+        const originalError = console.error;
+
+        // Re-entrancy guard to prevent infinite recursion
+        let _inCustomConsole = false;
+
+        function safeStringify(arg) {
+            if (arg instanceof Error) {
+                return arg.stack || arg.message || String(arg);
+            }
+            if (typeof arg === 'object' && arg !== null) {
+                try { return JSON.stringify(arg, null, 2); } catch { return String(arg); }
+            }
+            return String(arg);
+        }
+
+        console.log = function(...args) {
+            if (_inCustomConsole) return;
+            _inCustomConsole = true;
+            try {
+                const message = args.map(safeStringify).join(' ');
+                output.textContent += message + '\n';
+                output.scrollTop = output.scrollHeight;
+                originalLog.apply(console, args);
+            } finally {
+                _inCustomConsole = false;
+            }
+        };
+
+        console.error = function(...args) {
+            if (_inCustomConsole) return;
+            _inCustomConsole = true;
+            try {
+                const message = args.map(safeStringify).join(' ');
+                output.textContent += message + '\n';
+                output.scrollTop = output.scrollHeight;
+                originalError.apply(console, args);
+            } finally {
+                _inCustomConsole = false;
+            }
+        };
+
+        async function runTestsFromButton() {
+            const btn = document.querySelector('.btn-primary');
+            const spinner = document.getElementById('spinner');
+            const runText = document.getElementById('run-text');
+
+            btn.disabled = true;
+            spinner.style.display = 'inline-block';
+            runText.textContent = ' Running...';
+
+            output.textContent = '';
+            testResults = { total: 0, passed: 0, failed: 0 };
+
+            try {
+                // Call the actual test function from tests.js
+                if (window.runAllTests) {
+                    await window.runAllTests();
+                } else {
+                    console.error('runAllTests is not defined in window');
+                }
+                
+                // Parse results from output
+                const lines = output.textContent.split('\n');
+                const resultsLine = lines.find(l => l.includes('Results:'));
+                if (resultsLine) {
+                    const match = resultsLine.match(/(\d+) passed, (\d+) failed/);
+                    if (match) {
+                        testResults.passed += parseInt(match[1]);
+                        testResults.failed += parseInt(match[2]);
+                        testResults.total += testResults.passed + testResults.failed;
+                    }
+                }
+
+                updateSummary();
+            } catch (error) {
+                const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+                console.error('Test suite error:', errorMsg);
+                if (error && error.stack) {
+                    console.error('Stack trace:', error.stack);
+                }
+            } finally {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+                runText.textContent = '▶️ Run All Tests';
+            }
+        }
+
+        function updateSummary() {
+            const summary = document.getElementById('summary');
+            const total = testResults.total;
+            const passed = testResults.passed;
+            const failed = testResults.failed;
+            const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+
+            document.getElementById('total-tests').textContent = total;
+            document.getElementById('passed-tests').textContent = passed;
+            document.getElementById('failed-tests').textContent = failed;
+            document.getElementById('pass-rate').textContent = passRate + '%';
+
+            summary.style.display = 'block';
+        }
+
+        function clearOutput() {
+            output.textContent = '';
+            document.getElementById('summary').style.display = 'none';
+        }
+
+        function downloadReport() {
+            const content = output.textContent;
+            if (!content) {
+                alert('No test results to download. Run tests first.');
+                return;
+            }
+
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `pacs-test-report-${timestamp}.txt`;
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Auto-run tests on page load
+        window.addEventListener('load', () => {
+            console.log('Test suite loaded. Ready to run tests.');
+            console.log('Click "Run All Tests" button to start testing.\n');
+            
+            // Expose functions to window for onclick handlers
+            window.runTestsFromButton = runTestsFromButton;
+            window.clearOutput = clearOutput;
+            window.downloadReport = downloadReport;
+        });
+    </script>
+</body>
+</html>

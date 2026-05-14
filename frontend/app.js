@@ -1,13 +1,27 @@
 // ============================================
-// PACS Frontend - Application Logic
+// PACS Frontend - Modern Application
 // ============================================
 
-// ============ STATE MANAGEMENT ============
+// State Management
 const state = {
-    swipeHistory: [],
-    apiUrl: localStorage.getItem('apiUrl') || '',
-    reportUrl: localStorage.getItem('reportUrl') || '',
-    lastDirection: 'IN'
+    // API URLs
+    apiUrl: localStorage.getItem('apiUrl') || 'http://localhost:8080',
+    reportUrl: localStorage.getItem('reportUrl') || 'http://localhost:8081',
+    
+    // Auth
+    token: localStorage.getItem('pacs_token') || null,
+    currentBadge: localStorage.getItem('current_badge') || 'B001',
+    
+    // Data
+    swipeHistory: JSON.parse(localStorage.getItem('swipeHistory')) || [],
+    trendChart: null,
+    
+    // UI State
+    selectedTier: 'outer',
+    selectedDirection: 'IN',
+    
+    // Server status
+    serverOnline: false
 };
 
 // ============ INITIALIZATION ============
@@ -24,36 +38,118 @@ function initializeApp() {
 
 // ============ EVENT LISTENERS ============
 function setupEventListeners() {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', switchTab);
+    // New navigation system
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', switchTab);
     });
 
-    document.getElementById('btn-in').addEventListener('click', (e) => selectDirection(e, 'IN'));
-    document.getElementById('btn-out').addEventListener('click', (e) => selectDirection(e, 'OUT'));
-    document.getElementById('btn-swipe').addEventListener('click', sendSwipe);
-    document.getElementById('btn-clear-history').addEventListener('click', clearHistory);
-    document.getElementById('btn-export-history').addEventListener('click', exportHistory);
-    document.getElementById('btn-fetch-report').addEventListener('click', fetchReport);
-    document.getElementById('btn-test-connection').addEventListener('click', testServerConnection);
-    document.getElementById('api-url').addEventListener('change', saveSettings);
-    document.getElementById('report-url').addEventListener('change', saveSettings);
+    // Gate tier selection
+    document.querySelectorAll('.tier-btn').forEach(btn => {
+        btn.addEventListener('click', selectTier);
+    });
+
+    // Direction selection
+    document.querySelectorAll('.direction-btn').forEach(btn => {
+        btn.addEventListener('click', selectDirection);
+    });
+
+    // Swipe Tab
+    document.getElementById('btn-swipe')?.addEventListener('click', sendSwipe);
+    document.getElementById('btn-clear-history')?.addEventListener('click', clearHistory);
+
+    // Attendance Tab
+    document.getElementById('btn-fetch-attendance')?.addEventListener('click', fetchAttendance);
+    document.getElementById('btn-export-attendance')?.addEventListener('click', exportAttendanceExcel);
+
+    // Manager Tab
+    document.getElementById('btn-fetch-manager')?.addEventListener('click', fetchManagerTeam);
+
+    // Trend Tab
+    document.getElementById('btn-fetch-trend')?.addEventListener('click', fetchTrend);
+
+    // Alerts Tab
+    document.getElementById('btn-fetch-alerts')?.addEventListener('click', fetchAlerts);
+
+    // Settings Tab
+    document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
+    document.getElementById('btn-test-connection')?.addEventListener('click', testServerConnection);
+    document.getElementById('btn-dev-login')?.addEventListener('click', devLogin);
 }
 
 // ============ TAB SWITCHING ============
 function switchTab(e) {
-    const tabName = e.target.getAttribute('data-tab');
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-    e.target.classList.add('active');
-    document.getElementById(tabName).classList.add('active');
+    e.preventDefault();
+    const tabId = e.target.closest('.nav-item')?.getAttribute('data-tab');
+    if (!tabId) return;
+    
+    // Update active nav
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    e.target.closest('.nav-item').classList.add('active');
+    
+    // Update active tab content
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.getElementById(tabId)?.classList.add('active');
+    
+    // Update page title
+    const titles = {
+        'swipe-tab': '刷卡模擬器',
+        'attendance-tab': '出席報表',
+        'manager-tab': '主管視野報表',
+        'trend-tab': '趨勢分析',
+        'alerts-tab': '警報異常',
+        'settings-tab': '系統設定'
+    };
+    
+    const pageTitle = document.getElementById('page-title');
+    if (pageTitle) pageTitle.textContent = titles[tabId] || '刷卡模擬器';
+}
+
+// ============ GATE TIER SELECTION ============
+function selectTier(e) {
+    e.preventDefault();
+    const tier = e.target.closest('.tier-btn')?.getAttribute('data-tier');
+    if (!tier) return;
+    
+    document.querySelectorAll('.tier-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    e.target.closest('.tier-btn').classList.add('active');
+    state.selectedTier = tier;
+    
+    // Update gate options
+    const gateSelect = document.getElementById('gate-id');
+    if (gateSelect) {
+        if (tier === 'outer') {
+            gateSelect.innerHTML = `
+                <option value="Gate-1A">Gate-1A (外層)</option>
+                <option value="Gate-1B">Gate-1B (外層)</option>
+                <option value="Gate-1C">Gate-1C (外層)</option>
+            `;
+        } else {
+            gateSelect.innerHTML = `
+                <option value="Gate-2A">Gate-2A (內層)</option>
+                <option value="Gate-2B">Gate-2B (內層)</option>
+                <option value="Gate-2C">Gate-2C (內層)</option>
+            `;
+        }
+    }
 }
 
 // ============ DIRECTION SELECTION ============
-function selectDirection(e, direction) {
-    document.getElementById('direction').value = direction;
-    state.lastDirection = direction;
-    document.querySelectorAll('.direction-btn').forEach(btn => btn.classList.remove('active'));
-    e.target.classList.add('active');
+function selectDirection(e) {
+    e.preventDefault();
+    const direction = e.target.closest('.direction-btn')?.getAttribute('data-direction');
+    if (!direction) return;
+    
+    document.querySelectorAll('.direction-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    e.target.closest('.direction-btn').classList.add('active');
+    state.selectedDirection = direction;
 }
 
 // ============ API URL HELPERS ============
@@ -66,147 +162,74 @@ function getReportUrl() {
 
 // ============ SWIPE REQUEST ============
 async function sendSwipe() {
-    const badgeId = document.getElementById('badge-id').value.trim();
-    const siteId = document.getElementById('site-id').value;
-    const gateId = document.getElementById('gate-id').value;
-    const direction = document.getElementById('direction').value;
-
+    const badgeId = document.getElementById('badge-id')?.value?.trim();
+    const siteId = document.getElementById('site-id')?.value;
+    const gateId = document.getElementById('gate-id')?.value;
+    
     if (!badgeId) {
         alert('請輸入員工證件 ID');
         return;
     }
-
+    
     const payload = {
         badge_id: badgeId,
         site_id: siteId,
         gate_id: gateId,
-        direction: direction
+        direction: state.selectedDirection
     };
-
+    
     try {
         const response = await fetch(`${getApiUrl()}/v1/swipe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-
+        
         const data = await response.json();
-        displaySwipeResponse(response.status, data);
-        addToSwipeHistory(badgeId, siteId, gateId, direction, data.status);
-
-        setTimeout(() => {
-            document.getElementById('direction').value = state.lastDirection;
-            document.querySelectorAll('.direction-btn').forEach(btn => btn.classList.remove('active'));
-            if (state.lastDirection === 'IN') {
-                document.getElementById('btn-in').classList.add('active');
-            } else {
-                document.getElementById('btn-out').classList.add('active');
-            }
-        }, 500);
-
+        displaySwipeResponse(response.status, data, payload);
+        
     } catch (error) {
-        displaySwipeResponse(0, { error: error.message });
+        displaySwipeResponse(0, { error: error.message }, payload);
     }
 }
 
 // ============ SWIPE RESPONSE DISPLAY ============
-function displaySwipeResponse(status, data) {
-    const responseBox = document.getElementById('swipe-response');
-    const responseContent = document.getElementById('response-content');
-    const isSuccess = status === 200;
-
-    responseBox.classList.remove('hidden', 'success', 'error');
-    responseBox.classList.add(isSuccess ? 'success' : 'error');
-
-    responseContent.innerHTML = `
-        <strong>狀態碼:</strong> ${status}<br>
-        <strong>結果:</strong> ${JSON.stringify(data, null, 2)}
-    `;
-
-    responseBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-// ============ SWIPE HISTORY ============
-function addToSwipeHistory(badgeId, siteId, gateId, direction, status) {
-    const record = {
-        timestamp: new Date().toLocaleTimeString('zh-TW'),
-        badgeId, siteId, gateId, direction, status
-    };
-
-    state.swipeHistory.unshift(record);
-    if (state.swipeHistory.length > 50) state.swipeHistory.pop();
-
-    saveSwipeHistory();
-    renderSwipeHistory();
-}
-
-function saveSwipeHistory() {
-    localStorage.setItem('swipeHistory', JSON.stringify(state.swipeHistory));
-}
-
-function loadSwipeHistory() {
-    const saved = localStorage.getItem('swipeHistory');
-    if (saved) {
-        state.swipeHistory = JSON.parse(saved);
-        renderSwipeHistory();
+function displaySwipeResponse(status, data, payload) {
+    const idleDiv = document.getElementById('swipe-idle');
+    const successDiv = document.getElementById('swipe-success');
+    const failDiv = document.getElementById('swipe-fail');
+    
+    if (!idleDiv || !successDiv || !failDiv) return;
+    
+    idleDiv.classList.add('hidden');
+    successDiv.classList.add('hidden');
+    failDiv.classList.add('hidden');
+    
+    const isSuccess = status === 200 && data.status === 'SUCCESS';
+    const directionText = payload?.direction === 'IN' ? '進入' : '離開';
+    const gateText = payload?.gate_id ? ` (${payload.gate_id})` : '';
+    
+    if (isSuccess) {
+        successDiv.classList.remove('hidden');
+        document.getElementById('swipe-success-msg').textContent = `${directionText}【${payload.gate_id}】刷卡成功`;
+        
+        // Reset animation by removing and re-adding elements
+        const oldCircle = successDiv.querySelector('.checkmark-circle');
+        const newCircle = oldCircle.cloneNode(true);
+        oldCircle.parentNode.replaceChild(newCircle, oldCircle);
+    } else {
+        failDiv.classList.remove('hidden');
+        const reason = data.reason ? `${data.reason} - ` : '';
+        document.getElementById('swipe-fail-msg').textContent = `${directionText}【${payload.gate_id}】刷卡失敗 (${data.reason || '拒絕通行'})`;
+        
+        // Reset animation by removing and re-adding elements
+        const oldCircle = failDiv.querySelector('.cross-circle');
+        const newCircle = oldCircle.cloneNode(true);
+        oldCircle.parentNode.replaceChild(newCircle, oldCircle);
     }
 }
 
-function renderSwipeHistory() {
-    const tbody = document.getElementById('history-tbody');
 
-    if (state.swipeHistory.length === 0) {
-        tbody.innerHTML = '<tr class="empty"><td colspan="5">還沒有刷卡紀錄</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = state.swipeHistory.map(record => {
-        const statusClass = record.status === 'SUCCESS' ? 'status-success' : 'status-error';
-        const statusText = record.status === 'SUCCESS' ? '✓ 允許' : '✗ 拒絕';
-
-        return `
-            <tr>
-                <td>${record.timestamp}</td>
-                <td>${record.badgeId}</td>
-                <td>${record.siteId}</td>
-                <td>${record.direction === 'IN' ? '➡️ 進入' : '⬅️ 離開'}</td>
-                <td class="${statusClass}">${statusText}</td>
-            </tr>
-        `;
-    }).join('');
-}
-
-function clearHistory() {
-    if (confirm('確定要清除所有刷卡紀錄嗎？')) {
-        state.swipeHistory = [];
-        saveSwipeHistory();
-        renderSwipeHistory();
-        alert('已清除刷卡紀錄');
-    }
-}
-
-function exportHistory() {
-    if (state.swipeHistory.length === 0) {
-        alert('沒有可匯出的紀錄');
-        return;
-    }
-
-    const headers = ['時間', '證件ID', '地點', '閘門', '方向', '狀態'];
-    const rows = state.swipeHistory.map(r => [
-        r.timestamp, r.badgeId, r.siteId, r.gateId, r.direction, r.status
-    ]);
-
-    let csv = headers.join(',') + '\n';
-    rows.forEach(row => {
-        csv += row.map(cell => `"${cell}"`).join(',') + '\n';
-    });
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `swipe-history-${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-}
 
 // ============ REPORT FETCHING ============
 async function fetchReport() {
@@ -354,16 +377,456 @@ function updateServerStatus(online) {
     statusText.textContent = online ? '線上' : '離線';
 }
 
+// ============ ATTENDANCE REPORT ============
+async function fetchAttendance() {
+    const date = document.getElementById('attendance-date')?.value;
+    
+    try {
+        let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
+        if (date) {
+            url += `&date=${date}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || '查詢失敗');
+        }
+        
+        displayAttendanceReport(data);
+        
+    } catch (error) {
+        displayAttendanceError(error.message);
+    }
+}
+
+function displayAttendanceReport(reports) {
+    const statsContainer = document.getElementById('attendance-stats');
+    const tbody = document.getElementById('attendance-tbody');
+    
+    if (!reports || reports.length === 0) {
+        statsContainer.innerHTML = '<p class="placeholder">無資料</p>';
+        tbody.innerHTML = '<tr class="empty"><td colspan="9">無結果</td></tr>';
+        return;
+    }
+    
+    const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
+    const totalSwipes = reports.reduce((sum, r) => sum + (r.swipe_count || 0), 0);
+    const avgStayHours = (reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0) / reports.length).toFixed(1);
+    
+    statsContainer.innerHTML = `
+        <div class="stat-item">
+            <div class="stat-item-value">${reports.length}</div>
+            <div class="stat-item-label">總紀錄</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-item-value">${uniqueEmployees}</div>
+            <div class="stat-item-label">員工數</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-item-value">${totalSwipes}</div>
+            <div class="stat-item-label">刷卡次</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-item-value">${avgStayHours}</div>
+            <div class="stat-item-label">平均停留</div>
+        </div>
+    `;
+    
+    tbody.innerHTML = reports.map(report => {
+        const identity = (report.is_manager || report.role === 'manager') ? '<span class="badge-role manager">👔 主管</span>' : '<span class="badge-role employee">👤 員工</span>';
+        return `
+        <tr>
+            <td>${report.employee_id}</td>
+            <td>${report.name || '-'}</td>
+            <td>${identity}</td>
+            <td>${report.org_path || '-'}</td>
+            <td>${report.work_date || '-'}</td>
+            <td>${formatTime(report.first_in)}</td>
+            <td>${formatTime(report.last_out)}</td>
+            <td><strong>${report.swipe_count}</strong></td>
+            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
+        </tr>
+    `}).join('');
+}
+
+function displayAttendanceError(message) {
+    const statsContainer = document.getElementById('attendance-stats');
+    const tbody = document.getElementById('attendance-tbody');
+    
+    statsContainer.innerHTML = `<div style="color: var(--danger);">❌ ${message}</div>`;
+    tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
+}
+
+async function exportAttendanceExcel() {
+    const date = document.getElementById('attendance-date')?.value;
+    
+    try {
+        let url = `${getReportUrl()}/v1/reports/attendance/export`;
+        if (date) {
+            url += `?date=${date}`;
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error('匯出失敗');
+        }
+        
+        const blob = await response.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `attendance-${date || new Date().toISOString().split('T')[0]}.xlsx`;
+        link.click();
+        URL.revokeObjectURL(downloadUrl);
+        
+    } catch (error) {
+        alert('匯出失敗: ' + error.message);
+    }
+}
+
+// ============ MANAGER TEAM ============
+async function fetchManagerTeam() {
+    const badge = document.getElementById('manager-badge')?.value?.trim();
+    const date = document.getElementById('manager-date')?.value;
+    
+    if (!badge) {
+        alert('請輸入主管證件 ID');
+        return;
+    }
+    
+    try {
+        let url = `${getReportUrl()}/v1/reports/manager-team?as=${badge}`;
+        if (date) {
+            url += `&date=${date}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (response.status === 403) {
+            throw new Error(`${badge} 無主管權限`);
+        }
+        if (!response.ok) {
+            throw new Error(data.error || '查詢失敗');
+        }
+        
+        displayManagerTeam(data);
+        
+    } catch (error) {
+        displayManagerError(error.message);
+    }
+}
+
+function displayManagerTeam(data) {
+    const scopeDisplay = document.getElementById('manager-scope');
+    const tbody = document.getElementById('manager-tbody');
+    
+    if (!scopeDisplay || !tbody) return;
+    
+    scopeDisplay.textContent = data.manager_scope || '-';
+    
+    const reports = data.reports || [];
+    if (reports.length === 0) {
+        tbody.innerHTML = '<tr class="empty"><td colspan="9">無下屬出席紀錄</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = reports.map(report => {
+        const identity = (report.is_manager || report.role === 'manager') ? '<span class="badge-role manager">👔 主管</span>' : '<span class="badge-role employee">👤 員工</span>';
+        return `
+        <tr>
+            <td>${report.employee_id}</td>
+            <td>${report.name || '-'}</td>
+            <td>${identity}</td>
+            <td>${report.org_path || '-'}</td>
+            <td>${report.work_date || '-'}</td>
+            <td>${formatTime(report.first_in)}</td>
+            <td>${formatTime(report.last_out)}</td>
+            <td><strong>${report.swipe_count}</strong></td>
+            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
+        </tr>
+    `}).join('');
+}
+
+function displayManagerError(message) {
+    const scopeDisplay = document.getElementById('manager-scope');
+    const tbody = document.getElementById('manager-tbody');
+    
+    if (scopeDisplay) scopeDisplay.textContent = '查詢失敗';
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="color: var(--danger); text-align: center;">❌ ${message}</td></tr>`;
+}
+
+// ============ TREND ANALYSIS ============
+async function fetchTrend() {
+    const startDate = document.getElementById('trend-start')?.value;
+    const endDate = document.getElementById('trend-end')?.value;
+    const asBadge = document.getElementById('trend-as')?.value?.trim();
+    
+    if (!startDate || !endDate) {
+        alert('請選擇開始和結束日期');
+        return;
+    }
+    
+    const period = document.getElementById('trend-period')?.value || 'day';
+    
+    try {
+        let url = `${getReportUrl()}/v1/reports/trend?start_date=${startDate}&end_date=${endDate}&period=${period}`;
+        if (asBadge) {
+            url += `&as=${asBadge}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || '查詢失敗');
+        }
+        
+        displayTrendChart(data);
+        
+    } catch (error) {
+        alert('趨勢查詢失敗: ' + error.message);
+    }
+}
+
+function displayTrendChart(data) {
+    const scopeDisplay = document.getElementById('trend-scope-display');
+    if (scopeDisplay) {
+        scopeDisplay.textContent = data.scope || '全廠範圍 (Global)';
+    }
+
+    const trends = data.trends || [];
+    if (trends.length === 0) {
+        alert('無趨勢資料');
+        return;
+    }
+    
+    const selectedMetric = document.getElementById('trend-metric')?.value || 'avg_stay_hrs';
+    const labels = trends.map(t => t.bucket);
+    
+    let dataset = {};
+    if (selectedMetric === 'avg_stay_hrs') {
+        dataset = {
+            label: '平均停留時數 (hrs)',
+            data: trends.map(t => t.avg_stay_hrs),
+            borderColor: '#1e40af',
+            backgroundColor: 'rgba(30, 64, 175, 0.1)',
+            tension: 0.4,
+            fill: true
+        };
+    } else if (selectedMetric === 'head_count') {
+        dataset = {
+            label: '出勤人頭數 (persons)',
+            data: trends.map(t => t.head_count),
+            borderColor: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.1)',
+            tension: 0.4,
+            fill: true
+        };
+    } else if (selectedMetric === 'total_swipes') {
+        dataset = {
+            label: '總刷卡次數 (counts)',
+            data: trends.map(t => t.total_swipes),
+            borderColor: '#fbbf24',
+            backgroundColor: 'rgba(251, 191, 36, 0.1)',
+            tension: 0.4,
+            fill: true
+        };
+    }
+    
+    const metricUnits = {
+        'avg_stay_hrs': '時數 (hrs)',
+        'head_count': '人數 (persons)',
+        'total_swipes': '次數 (counts)'
+    };
+    const currentUnit = metricUnits[selectedMetric] || '';
+    const datasets = [dataset];
+    
+    if (state.trendChart) {
+        state.trendChart.destroy();
+    }
+    
+    const ctx = document.getElementById('trend-chart');
+    if (!ctx) return;
+    
+    state.trendChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#f1f5f9' } }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: currentUnit,
+                        color: '#94a3b8',
+                        font: { size: 12 }
+                    },
+                    ticks: { color: '#f1f5f9' },
+                    grid: { color: 'rgba(71, 85, 105, 0.2)' }
+                },
+                x: {
+                    ticks: { color: '#f1f5f9' },
+                    grid: { color: 'rgba(71, 85, 105, 0.2)' }
+                }
+            }
+        }
+    });
+}
+
+// ============ ALERTS ============
+async function fetchAlerts() {
+    const severity = document.getElementById('alert-severity')?.value;
+    
+    try {
+        let url = `${getReportUrl()}/v1/alerts`;
+        if (severity) {
+            url += `?severity=${severity}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || '查詢失敗');
+        }
+        
+        displayAlerts(data);
+        
+    } catch (error) {
+        alert('警報查詢失敗: ' + error.message);
+    }
+}
+
+function displayAlerts(alerts) {
+    const container = document.getElementById('alerts-list');
+    if (!container) return;
+    
+    if (!alerts || alerts.length === 0) {
+        container.innerHTML = '<p class="placeholder">暫無警報</p>';
+        return;
+    }
+    
+    container.innerHTML = alerts.map(alert => {
+        const severityClass = alert.severity.toLowerCase();
+        const severityIcon = {
+            'critical': '🔴',
+            'high': '🟠',
+            'medium': '🟡',
+            'low': '🟢'
+        }[severityClass] || '⚠️';
+        
+        return `
+            <div class="alert-item ${severityClass}">
+                <div class="alert-header">
+                    <span class="alert-type">${severityIcon} ${alert.alert_type}</span>
+                    <span class="alert-time">${new Date(alert.occurred_at).toLocaleString('zh-TW')}</span>
+                </div>
+                <div class="alert-details">
+                    <div><strong>嚴重程度:</strong> ${alert.severity}</div>
+                    <div><strong>員工ID:</strong> ${alert.badge_id || '-'}</div>
+                    <div><strong>地點:</strong> ${alert.site_id}/${alert.gate_id}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ============ DEV LOGIN ============
+async function devLogin() {
+    const badge = document.getElementById('dev-login-badge')?.value?.trim();
+    
+    if (!badge) {
+        alert('請輸入員工ID');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${getReportUrl()}/v1/dev/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ badge_id: badge })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || '登入失敗');
+        }
+        
+        state.token = data.access_token;
+        state.currentBadge = badge;
+        
+        localStorage.setItem('pacs_token', data.access_token);
+        localStorage.setItem('current_badge', badge);
+        
+        const tokenInfo = document.getElementById('token-info');
+        const roleText = data.is_manager ? "👔 主管" : "👤 員工";
+        
+        if (tokenInfo) {
+            tokenInfo.innerHTML = `
+                <strong>✓ 登入成功</strong><br>
+                員工: ${badge} (${roleText})<br>
+                Token: ${data.access_token.substring(0, 50)}...<br>
+                有效期: ${Math.floor(data.expires_in / 3600)} 小時
+            `;
+        }
+        
+        updateProfileDisplay(badge, data.is_manager);
+        
+    } catch (error) {
+        alert('登入失敗: ' + error.message);
+    }
+}
+
+function updateProfileDisplay(badge, isManager = false) {
+    const profileName = document.getElementById('profile-name');
+    const profileStatus = document.getElementById('profile-status');
+    if (profileName) {
+        profileName.textContent = badge;
+    }
+    if (profileStatus && badge !== '訪客') {
+        profileStatus.innerHTML = isManager ? '<span style="color:var(--primary)">👔 主管</span>' : '<span style="color:var(--text-secondary)">👤 員工</span>';
+    }
+}
+
 // ============ UTILITIES ============
 function formatTime(timeString) {
     if (!timeString) return '-';
     try {
         const date = new Date(timeString);
-        return date.toLocaleTimeString('zh-TW');
+        return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
     } catch {
         return timeString;
     }
 }
+
+function getDateDaysAgo(days) {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return date.toISOString().split('T')[0];
+}
+
+// Set default dates on load
+window.addEventListener('load', () => {
+    const today = new Date().toISOString().split('T')[0];
+    const attendanceDateInput = document.getElementById('attendance-date');
+    const managerDateInput = document.getElementById('manager-date');
+    const trendStartInput = document.getElementById('trend-start');
+    const trendEndInput = document.getElementById('trend-end');
+    
+    if (attendanceDateInput) attendanceDateInput.value = today;
+    if (managerDateInput) managerDateInput.value = today;
+    if (trendStartInput) trendStartInput.value = getDateDaysAgo(7);
+    if (trendEndInput) trendEndInput.value = today;
+});
 
 // Periodically test connection every 30 seconds
 setInterval(() => {

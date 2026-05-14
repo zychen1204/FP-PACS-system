@@ -59,6 +59,7 @@ Cloud-Native Physical Access Control System
 ## 快速啟動
 
 ```bash
+# ⚠️  第一次啟動或前端有更新時，務必加 --build
 docker compose up -d --build
 sleep 25                          # 等 migrate + 各 service ready
 ```
@@ -67,6 +68,16 @@ sleep 25                          # 等 migrate + 各 service ready
 - **Access API**: <http://localhost:8080>
 - **Reporting API**: <http://localhost:8081>
 - **完整驗收劇本**：[`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)
+
+### 前端 v2.0 升級（新）
+
+前端已從 v1.0 升級到 v2.0，包含：
+- ✅ 兩層門禁系統 (外層1-A/B/C + 內層2-A/B/C)
+- ✅ **主管視野**（必須輸入主管ID，權限驗證）
+- ✅ 現代UI
+- ✅ 完整數據導出（Excel）
+
+👉 [前端v2.0改動總結](docs/FRONTEND.md) | [後端整合規格](docs/BACKEND_INTEGRATION.md) | [測試方法](TESTING.md#-前端測試流程-pacs-frontend-v20)
 
 ## 技術棧
 

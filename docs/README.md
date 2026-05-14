@@ -20,6 +20,8 @@
 | [`PHASE2_CHANGES.md`](PHASE2_CHANGES.md) | Phase 2 後端設計改動記錄（10 section，4 commit / 21 檔案 / +2216 行的「why & how」）| 看 PR、review code、要理解設計取捨的人 |
 | [`PHASE2_VERIFICATION.md`](PHASE2_VERIFICATION.md) | 完整 19-section 驗收劇本：每節含對應 FR/NFR、可重現命令、實測輸出、結論 | TA、組長、自我回顧 |
 | [`FRONTEND_INTEGRATION.md`](FRONTEND_INTEGRATION.md) | 前端組員整合指引：5 個新 endpoint API 字典、認證流程、UI 規劃、JS snippet、FAQ | 前端組員 |
+| [`FRONTEND.md`](FRONTEND.md) | 前端 v2.0 改良總結：UI/UX 升級、兩層門禁系統、報表系統、API 集成、完整測試覆蓋 | 所有人 |
+| [`REPORT_JSON_SCHEMAS.md`](REPORT_JSON_SCHEMAS.md) | API 數據格式與響應示例 | API 調用者 |
 
 ### 三組文件關係
 
@@ -32,6 +34,7 @@ database-spec.md → PHASE2_CHANGES.md → PHASE2_VERIFICATION.md
                           └── database-compliance.md (FR/NFR ↔ 實作 ↔ 證據)
 
                        前端組員另看 → FRONTEND_INTEGRATION.md
+                       前端改良總結 → FRONTEND.md
 ```
 
 ## 與其他文件的關係
@@ -41,10 +44,12 @@ database-spec.md → PHASE2_CHANGES.md → PHASE2_VERIFICATION.md
 | `../README.md` | 專案首頁、架構圖、技術棧、Schema 摘要 |
 | `../TESTING.md` | 端到端測試步驟（手動 demo 用） |
 | `../scripts/README.md` | Migration 命名規範、新增流程、Phase 2 partition 維護 |
+| `../frontend/` | 前端完整代碼 |
 
 `docs/` 與上面三者**無重複內容**：
 
-- 規範與設計 → `docs/`
+- 規範與設計 → `docs/`（database-spec/erd/compliance）
+- 前端設計與整合 → `docs/FRONTEND*.md`（FRONTEND.md、FRONTEND_INTEGRATION.md）
 - 操作步驟 → `TESTING.md`
 - Migration 工程規範 → `scripts/README.md`
 - Onboarding 摘要 → 根 `README.md`
