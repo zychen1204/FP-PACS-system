@@ -314,15 +314,48 @@ func TestHandleSwipe_CorrectExitOrder_Returns200(t *testing.T) {
 	}
 }
 
-// Site isolation: APB state is independent per site.
+// Site isolation: APB state is independent per site (no cross-site state bleed).
+// After fully exiting Site-A, Site-B has no pre-existing APB state for the badge.
 func TestHandleSwipe_SiteSeparation_IndependentAPB(t *testing.T) {
 	r := newTestRouter()
-	doSwipeAt(r, "SITE_B", "Site-A", "1-A", "IN") // IN at Site-A
+	doSwipeAt(r, "SITE_B", "Site-A", "1-A", "IN")  // enter Site-A
+	doSwipeAt(r, "SITE_B", "Site-A", "1-A", "OUT") // fully exit Site-A
 
-	// Same badge, same gate, same direction but DIFFERENT site → should be allowed
+	// Site-B APB is clean — first IN should succeed, not be blocked as duplicate IN
 	w := doSwipeAt(r, "SITE_B", "Site-B", "1-A", "IN")
 	if w.Code != http.StatusOK {
-		t.Fatalf("status got=%d want=200: different site should have independent APB", w.Code)
+		t.Fatalf("status got=%d want=200: Site-B APB should be independent from Site-A", w.Code)
+	}
+}
+
+// Cross-site exclusivity: badge inside Site-A cannot enter Site-B.
+func TestHandleSwipe_CrossSite_BlockedWhileInsideAnotherSite(t *testing.T) {
+	r := newTestRouter()
+	doSwipeAt(r, "CSBLOCK_B", "Site-A", "1-A", "IN") // enter Site-A outer
+	doSwipeAt(r, "CSBLOCK_B", "Site-A", "2-A", "IN") // enter Site-A inner
+
+	w := doSwipeAt(r, "CSBLOCK_B", "Site-B", "1-A", "IN") // attempt Site-B while inside Site-A
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status got=%d want=403: cannot enter Site-B while inside Site-A", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error_code"] != "ERR_CROSS_SITE" {
+		t.Errorf("error_code got=%q want=ERR_CROSS_SITE", resp["error_code"])
+	}
+}
+
+// Cross-site: after fully exiting Site-A, badge may enter Site-B.
+func TestHandleSwipe_CrossSite_AllowedAfterFullExit(t *testing.T) {
+	r := newTestRouter()
+	doSwipeAt(r, "CSEXIT_B", "Site-A", "1-A", "IN")  // enter outer
+	doSwipeAt(r, "CSEXIT_B", "Site-A", "2-A", "IN")  // enter inner
+	doSwipeAt(r, "CSEXIT_B", "Site-A", "2-A", "OUT") // exit inner
+	doSwipeAt(r, "CSEXIT_B", "Site-A", "1-A", "OUT") // exit outer
+
+	w := doSwipeAt(r, "CSEXIT_B", "Site-B", "1-A", "IN") // now allowed at Site-B
+	if w.Code != http.StatusOK {
+		t.Fatalf("status got=%d want=200: should be allowed to enter Site-B after fully exiting Site-A", w.Code)
 	}
 }
 
