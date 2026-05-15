@@ -38,32 +38,42 @@ func TestMockLDAP_AllRecordsHaveRequiredFields(t *testing.T) {
 	}
 }
 
-// FR-6 / FR-9: There must be both managers and non-manager employees
-func TestMockLDAP_ContainsBothManagersAndEmployees(t *testing.T) {
-	var hasManager, hasEmployee bool
+// FR-6 / FR-9: There must be both managers and non-manager employees,
+// and at least one L1 + one L2 manager so the multi-tier hierarchy is exercised.
+func TestMockLDAP_ContainsAllJobLevels(t *testing.T) {
+	var hasStaff, hasL1, hasL2 bool
 	for _, r := range mockLDAP() {
-		if r.isManager {
-			hasManager = true
-		} else {
-			hasEmployee = true
+		switch r.jobLevel {
+		case JobLevelStaff:
+			hasStaff = true
+		case JobLevelManagerL1:
+			hasL1 = true
+		case JobLevelManagerL2:
+			hasL2 = true
+		default:
+			t.Errorf("record %s: unexpected job_level %q (must be one of STAFF / MANAGER_L1 / MANAGER_L2)", r.badgeID, r.jobLevel)
 		}
 	}
-	if !hasManager {
-		t.Error("mockLDAP must include at least one manager (is_manager=true) for FR-6/FR-9")
+	if !hasStaff {
+		t.Error("mockLDAP must include at least one STAFF for FR-9 negative test")
 	}
-	if !hasEmployee {
-		t.Error("mockLDAP must include at least one non-manager employee for FR-9 negative test")
+	if !hasL1 {
+		t.Error("mockLDAP must include at least one MANAGER_L1 (一級主管) for FR-6")
+	}
+	if !hasL2 {
+		t.Error("mockLDAP must include at least one MANAGER_L2 (二級主管) for FR-6")
 	}
 }
 
-// Verify the expected fab manager badge exists (used as the default in dev tests)
+// Verify the expected fab manager badge exists (used as the default in dev tests).
+// B100 (廠長) must be MANAGER_L1.
 func TestMockLDAP_ContainsFabManager_B100(t *testing.T) {
 	found := false
 	for _, r := range mockLDAP() {
 		if r.badgeID == "B100" {
 			found = true
-			if !r.isManager {
-				t.Error("B100 (fab manager) should have is_manager=true")
+			if r.jobLevel != JobLevelManagerL1 {
+				t.Errorf("B100 (fab manager) should have job_level=%q, got %q", JobLevelManagerL1, r.jobLevel)
 			}
 		}
 	}

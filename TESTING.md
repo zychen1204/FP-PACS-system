@@ -258,55 +258,62 @@ docker compose exec postgres psql -U pacs_user -d pacs_db -c \
 
 ## Step 12：驗證 FR-6 / FR-9 階層查詢（DB 層）
 
-`employees.is_manager` 旗標 + `org_path` LIKE prefix 是 FR-6（階層團隊報表）
-與 FR-9（階層資料權限）的 DB 層支援。三個 sub-step 對應「看員工樹 →
-廠長視野（跨部門）→ 部主管視野（單一部門）」。
+`employees.job_level`（VARCHAR + CHECK，migration `0102`）+ `org_path_ltree` 子樹查詢
+是 FR-6（階層團隊報表）與 FR-9（階層資料權限）的 DB 層支援。三個 sub-step
+對應「看員工樹 → 廠長（一級主管）視野 → 部主管（二級主管）視野」。
 
 ```bash
-# 12.1 看員工樹與 manager 標記
+# 12.1 看員工樹與職等
 docker compose exec postgres psql -U pacs_user -d pacs_db -c "
-  SELECT badge_id, name, org_path, is_manager
+  SELECT badge_id, name, org_path, job_level
   FROM employees
-  ORDER BY org_path, badge_id;"
-# 預期：8 員工；B100/B001-B005 is_manager=t；B011/B012 為 f
+  ORDER BY job_level, org_path, badge_id;"
+# 預期：9 員工
+#   - B100               → MANAGER_L1
+#   - B001/B002/B003/B004/B005 → MANAGER_L2
+#   - B011/B012/B013     → STAFF
 
 # 12.2 廠長 B100 視野（FR-6 跨部門 drill-down）— pattern a 兩段式
 docker compose exec -T postgres psql -U pacs_user -d pacs_db <<'EOF'
 \set caller 'B100'
 SELECT org_path FROM employees
-  WHERE badge_id = :'caller' AND is_manager = TRUE \gset
+  WHERE badge_id = :'caller' AND job_level <> 'STAFF' \gset
 \echo Manager scope: :org_path
 SELECT e.badge_id, e.name, e.org_path,
        COUNT(ae.id) FILTER (WHERE ae.status='SUCCESS') AS swipes
 FROM employees e
 LEFT JOIN access_events ae ON ae.badge_id = e.badge_id
-WHERE e.org_path = :'org_path' OR e.org_path LIKE :'org_path' || '.%'
+WHERE e.org_path_ltree <@ :'org_path'::ltree
 GROUP BY e.badge_id, e.name, e.org_path
 ORDER BY e.org_path, e.badge_id;
 EOF
-# 預期：5 列 — B100 / B002 / B001 / B011 / B012；
-#       B011/B012 swipes=0（剛入職還沒打卡是合理場景）
+# 預期：6 列 — B100 / B002 / B001 / B011 / B012 / B013；
+#       B011/B012/B013 swipes=0（剛入職還沒打卡是合理場景）
 
 # 12.3 部主管 B001 視野
 docker compose exec -T postgres psql -U pacs_user -d pacs_db <<'EOF'
 \set caller 'B001'
 SELECT org_path FROM employees
-  WHERE badge_id = :'caller' AND is_manager = TRUE \gset
+  WHERE badge_id = :'caller' AND job_level <> 'STAFF' \gset
 \echo Manager scope: :org_path
 SELECT e.badge_id, e.name, e.org_path
 FROM employees e
-WHERE e.org_path = :'org_path' OR e.org_path LIKE :'org_path' || '.%'
+WHERE e.org_path_ltree <@ :'org_path'::ltree
 ORDER BY e.badge_id;
 EOF
-# 預期：3 列 — B001 / B011 / B012
+# 預期：4 列 — B001 / B011 / B012 / B013
 ```
 
 > 註 1（pattern a 兩段式）：上面 `\gset` 把第 1 段（取 manager scope）
 > 的結果綁到 psql 變數 `:org_path`，讓第 2 段直接帶入。Backend 實作時
 > 第 1 段回空表示「caller 不是主管」，應回 HTTP 403（FR-9 negative case）。
 >
-> 註 2（FR-9 negative）：`SELECT org_path FROM employees WHERE badge_id='B011' AND is_manager=TRUE`
+> 註 2（FR-9 negative）：`SELECT org_path FROM employees WHERE badge_id='B011' AND job_level <> 'STAFF'`
 > 應回 0 列；DB 不擋查詢，由 backend 處理 403 邏輯。
+>
+> 註 3（多階主管驗證）：B100（`MANAGER_L1`）與 B001（`MANAGER_L2`）兩種職等
+> 都會通過 `job_level <> 'STAFF'` 檢查，因此都會回傳 scope。權限範圍仍由
+> 各自的 `org_path_ltree` 子樹界定（廠長看整個 Fab12、部主管只看製造部）。
 
 ---
 

@@ -43,7 +43,7 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 | FR-5 | 個人出勤紀錄 | 每筆事件須含 `event_time` / `gate_id` / `direction`；`stay_hours` 由 reporting-api 用 IN/OUT 配對計算 | ✅ |
 | FR-6 | 階層式組織報表（drill-down） | **Phase 2**：`employees.org_path_ltree LTREE` + GiST index；查詢用 `<@` ancestor operator 命中 index | ✅ |
 | FR-7 | 出勤趨勢報表 | **Phase 2**：`mv_daily_attendance` materialized view + `mv-refresher` 每 5 min `REFRESH CONCURRENTLY` | ✅ |
-| FR-9 | 階層式資料權限（manager 只看子樹） | DB 層提供 `org_path_ltree` 與 `is_manager`；filter logic 由 reporting-api 處理（pattern a：先 `GetManagerScope` 取 scope、空回 403；非空用 `<@` 限縮）| ✅ |
+| FR-9 | 階層式資料權限（manager 只看子樹） | DB 層提供 `org_path_ltree` 與 `job_level`（多階主管：`MANAGER_L1`/`MANAGER_L2`）；filter logic 由 reporting-api 處理（pattern a：先 `GetManagerScope`（`job_level <> 'STAFF'`）取 scope、空回 403；非空用 `<@` 限縮）。scope 語意仍為「自己 `org_path_ltree` 子樹」，不因 `job_level` 改變 | ✅ |
 | FR-11 | 異常警報 | `alerts` 表（`alert_type` CHECK 列舉、`severity`、`details JSONB`），anomaly-detector 寫入、reporting-api 透過 `/v1/alerts` 讀 | ✅ |
 | FR-12 | 不可變更稽核（Immutable Audit） | 雙層保護：(a) `REVOKE UPDATE, DELETE ON access_events FROM pacs_user` (b) `BEFORE UPDATE OR DELETE` 與 `BEFORE TRUNCATE` trigger（partition 後重掛到 partition root）| ✅ |
 | FR-13 | Audit 查詢（badge × 日期範圍） | 索引 `idx_events_badge_eventdate` 支援 `WHERE badge_id = ? AND event_date BETWEEN ?` 高效查詢；partition pruning 自動裁剪非相關月份 | ✅ |
@@ -70,7 +70,7 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 
 | 階段 | DAU | events/day | 年度資料量 | DB 配置 | 落地狀態 |
 |---|---|---|---|---|:---:|
-| Phase 1（試點 Fab12） | 1,000 | 6,000 | 210 MB | 單一 PostgreSQL、無 partitioning、`org_path` + `is_manager` | ✅ baseline |
+| Phase 1（試點 Fab12） | 1,000 | 6,000 | 210 MB | 單一 PostgreSQL、無 partitioning、`org_path` + `job_level`（多階主管，migration `0102`，取代早期 `is_manager` BOOLEAN）| ✅ baseline |
 | Phase 2（全廠） | 30,000 | 300,000 | 10 GB | PG 16 + 按月 partitioning（36 個月）+ `mv_daily_attendance` + ltree + GiST + alerts + DLQ + read replica alias | ✅ 已落地 |
 | Phase 3（全球） | 90,000 | 1,080,000 | 40 GB | AlloyDB（區域內）+ BigQuery（全球分析）+ archive > 24 個月 | 🔮 未來 |
 

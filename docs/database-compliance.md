@@ -77,9 +77,9 @@
 | 項目 | 內容 |
 |---|---|
 | 規範 | manager 只看 org tree 子節點；跨部門查詢回 403 |
-| 實作（DB 層）| 提供 `org_path_ltree` (migration `0003`) + `is_manager` (migration `0002`) — schema 完備 |
+| 實作（DB 層）| 提供 `org_path_ltree` (migration `0003`) + `job_level` VARCHAR + CHECK (migration `0102`，取代早期 `is_manager` BOOLEAN) — schema 完備且支援多階主管 |
 | 實作（API 層）| reporting-api 採 pattern a 兩段式：`GetManagerScope(badge)` 空回 403，否則 `<@` filter；JWT middleware (`internal/auth`) 提供 badge_id |
-| Backend 實作範本（pattern a）| ```sql<br>-- Step 1: 驗證 caller 是主管 + 取 scope<br>SELECT org_path_ltree::text FROM employees<br>WHERE badge_id = $1 AND is_manager = TRUE AND is_active = TRUE;<br>-- 若回傳空 → backend 回 403 Forbidden<br><br>-- Step 2: 用 Step 1 的 path 過濾子樹（命中 GiST）<br>SELECT ... FROM mv_daily_attendance<br>WHERE org_path_ltree <@ $2::ltree;<br>``` |
+| Backend 實作範本（pattern a）| ```sql<br>-- Step 1: 驗證 caller 是主管 + 取 scope<br>SELECT org_path_ltree::text FROM employees<br>WHERE badge_id = $1 AND job_level <> 'STAFF' AND is_active = TRUE;<br>-- 若回傳空 → backend 回 403 Forbidden<br><br>-- Step 2: 用 Step 1 的 path 過濾子樹（命中 GiST）<br>SELECT ... FROM mv_daily_attendance<br>WHERE org_path_ltree <@ $2::ltree;<br>``` |
 | 驗證 | `curl -w 'http=%{http_code}\n' 'http://localhost:8081/v1/reports/manager-team?as=B011'` |
 | 實測結果 | B011 非主管 → `http=403 {"badge_id":"B011","error":"not a manager"}` |
 | 為何 DB 層不直接 enforce | DB 沒有「session 身份」概念（pacs_reporter 是共用 read role）；身份驗證屬 API 層責任（JWT / OIDC），DB 層只能提供 schema 與資料 |
@@ -212,11 +212,13 @@
 ## 4.5 Schema gap closure — FR-6 / FR-9 演進
 
 PR #1 baseline 落地後深度核對 spec 發現，`org_path` VARCHAR 只能描述員工
-歸屬部門，但無法 (a) 識別主管、(b) 高效做子樹查詢。修補分兩段：
+歸屬部門，但無法 (a) 識別主管、(b) 高效做子樹查詢。修補分三段：
 
 1. **migration `0002`**：加 `is_manager BOOLEAN`，補 3 個 demo 員工讓階層查詢有實質範圍
 2. **migration `0003` (Phase 2)**：加 `org_path_ltree LTREE` + GiST index 對齊 HW2 §5.2/§5.3，
    API 改用 `<@` ancestor 命中 GiST
+3. **migration `0102`**：以 `job_level VARCHAR(20) CHECK IN ('STAFF','MANAGER_L1','MANAGER_L2')`
+   取代 `is_manager`，讓「一級主管 vs. 二級主管」可在 DB 層識別；scope 語意不變
 
 ### 評估過但未採用的方案
 
