@@ -1,4 +1,4 @@
-# `docs/` — PACS 規範與設計文件
+# 📚 PACS 文件索引 (Documentation Index)
 
 本資料夾蒐集 PACS 系統的「規範書 + 設計文件 + 實作對照 + 驗收 + 整合指引」等歷史與現行文件。
 
@@ -6,8 +6,8 @@
 
 | 文件 | 用途 |
 |---|---|
-| [`TodoList.md`](TodoList.md) | 列出後續預計實作的重點功能與修復項目（包含前、後端與資料庫）。 |
-| [`SimulationGuide.md`](SimulationGuide.md) | 關於員工與刷卡紀錄模擬指南。 |
+| [實作與修復待辦事項](TodoList.md) | 列出後續預計實作的重點功能與修復項目（包含前、後端與資料庫）。 |
+| [資料模擬與測試指南](SimulationGuide.md) | 關於 1000 人大規模員工與刷卡紀錄模擬、壓力測試的詳細指引。 |
 
 ## 歷史文件 (History)
 

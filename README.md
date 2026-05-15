@@ -41,11 +41,11 @@ sleep 25  # 等待 migrate 與各服務就緒
 
 
 ### 🌟 開發重點
-- **待辦清單**: 👉 [`docs/TodoList.md`](docs/TodoList.md) (包含前端/後端/DB的具體實作指引)
-- **資料模擬**: 👉 [`docs/SimulationGuide.md`](docs/SimulationGuide.md) (1000 人資料模擬)
+- **待辦清單**: 👉 [待辦事項](docs/TodoList.md)
+- **資料模擬**: 👉 [模擬指南](docs/SimulationGuide.md)
 
 ## 🧪 測試與驗證
 
 本系統提供豐富的單元與端到端 (E2E) 測試機制。
-👉 **[完整手動與自動化測試詳細腳本 (docs/TestingGuide.md)](docs/TestingGuide.md)**
+👉 **[測試詳細](docs/TestingGuide.md)**
 
