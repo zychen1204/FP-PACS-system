@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pacs-config
+  namespace: pacs
+data:
+  DB_HOST: "cloudsql-proxy"  # Cloud SQL Proxy service
+  DB_PORT: "5432"
+  DB_USER: "pacs_user"
+  DB_NAME: "pacs_db"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  PORT: "8080"
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pacs-secrets
+  namespace: pacs
+type: Opaque
+stringData:
+  DB_PASSWORD: "your-secure-password-here"  # Change this!
+  POSTGRES_PASSWORD: "your-secure-password-here"

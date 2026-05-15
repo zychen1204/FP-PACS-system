@@ -615,7 +615,8 @@ function displayTrendChart(data) {
         scopeDisplay.textContent = data.scope || '全廠範圍 (Global)';
     }
 
-    const trends = data.trends || [];
+    // 反轉趨勢資料，讓日期從左到右的排序反過來
+    const trends = (data.trends || []).reverse();
     if (trends.length === 0) {
         alert('無趨勢資料');
         return;

@@ -1,0 +1,21 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: access-api-pdb
+  namespace: pacs
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: access-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: reporting-api-pdb
+  namespace: pacs
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: reporting-api

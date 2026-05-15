@@ -5,7 +5,7 @@ import "time"
 // SwipeRequest represents an incoming badge swipe request
 type SwipeRequest struct {
 	BadgeID   string `json:"badge_id" binding:"required"`
-	SiteID    string `json:"site_id"`  // optional, forwarded from frontend for DB storage
+	SiteID    string `json:"site_id"` // optional, forwarded from frontend for DB storage
 	GateID    string `json:"gate_id" binding:"required"`
 	Direction string `json:"direction" binding:"required,oneof=IN OUT"`
 }
@@ -46,21 +46,21 @@ type AttendanceReport struct {
 // AttendanceTrend is the per-bucket aggregate result for FR-7 trend reports.
 // Bucket 由 reporting-api 在 MV 上做 date_trunc 切（day/week/month/quarter）。
 type AttendanceTrend struct {
-	Bucket      string  `json:"bucket"`        // ISO date string of bucket start
-	HeadCount   int     `json:"head_count"`    // distinct badges in bucket
-	AvgStayHrs  float64 `json:"avg_stay_hrs"`  // average stay_hours across badges
-	TotalSwipes int     `json:"total_swipes"`  // sum of swipe_count
+	Bucket      string  `json:"bucket"`       // ISO date string of bucket start
+	HeadCount   int     `json:"head_count"`   // distinct badges in bucket
+	AvgStayHrs  float64 `json:"avg_stay_hrs"` // average stay_hours across badges
+	TotalSwipes int     `json:"total_swipes"` // sum of swipe_count
 }
 
 // Alert is FR-11 anomaly record.
 type Alert struct {
-	ID         int64     `json:"id"`
-	AlertType  string    `json:"alert_type"`
-	Severity   string    `json:"severity"`
-	BadgeID    *string   `json:"badge_id,omitempty"`
-	SiteID     *string   `json:"site_id,omitempty"`
-	GateID     *string   `json:"gate_id,omitempty"`
-	Details    string    `json:"details"` // JSON as raw string for forward-compat
-	OccurredAt time.Time `json:"occurred_at"`
+	ID         int64      `json:"id"`
+	AlertType  string     `json:"alert_type"`
+	Severity   string     `json:"severity"`
+	BadgeID    *string    `json:"badge_id,omitempty"`
+	SiteID     *string    `json:"site_id,omitempty"`
+	GateID     *string    `json:"gate_id,omitempty"`
+	Details    string     `json:"details"` // JSON as raw string for forward-compat
+	OccurredAt time.Time  `json:"occurred_at"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }

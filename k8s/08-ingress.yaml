@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pacs-ingress
+  namespace: pacs
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.allow-http: "true"
+    # GKE 特定設定：靜態 IP (需要先建立)
+    # kubernetes.io/kubernetes.io/static-ip-name: "pacs-ip"
+spec:
+  rules:
+  - http:
+      paths:
+      # Frontend (Default)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+      # Access API
+      - path: /v1/swipe
+        pathType: Prefix
+        backend:
+          service:
+            name: access-api
+            port:
+              number: 8080
+      # Reporting API
+      - path: /v1/reports
+        pathType: Prefix
+        backend:
+          service:
+            name: reporting-api
+            port:
+              number: 8081

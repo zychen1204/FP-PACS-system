@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-api
+  namespace: pacs
+  labels:
+    app: reporting-api
+    version: v2
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: reporting-api
+  template:
+    metadata:
+      labels:
+        app: reporting-api
+        version: v2
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: pacs-sa
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: reporting-api
+        image: gcr.io/PROJECT_ID/pacs-reporting-api:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+        env:
+        - name: SERVICE
+          value: "reporting-api"
+        - name: PORT
+          value: "8081"
+        # GKE 上用 Cloud SQL Proxy sidecar
+        - name: DB_HOST
+          value: "127.0.0.1"        # Cloud SQL Proxy 監聽本機
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: LOG_LEVEL
+        # 生產環境不 bypass JWT
+        - name: DEV_AUTH_BYPASS
+          value: "0"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: JWT_SECRET
+              optional: true        # 若 Secret 不存在，程式自行處理
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 2
+          timeoutSeconds: 3
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]
+      # ── Cloud SQL Proxy Sidecar ──────────────────────────
+      - name: cloud-sql-proxy
+        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
+        args:
+        - "--structured-logs"
+        - "--port=5432"
+        - "$(CLOUD_SQL_INSTANCE)"
+        env:
+        - name: CLOUD_SQL_INSTANCE
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: CLOUD_SQL_INSTANCE
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+# ── ClusterIP Service（由 Ingress 控制外部存取）──────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting-api
+  namespace: pacs
+  labels:
+    app: reporting-api
+spec:
+  selector:
+    app: reporting-api
+  ports:
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+# ── HPA ──────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: reporting-api-hpa
+  namespace: pacs
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: reporting-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300

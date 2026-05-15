@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pacs-default-policy
+  namespace: pacs
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  # 允許內部互相通訊 (簡化版，實際環境可更嚴格)
+  - from:
+    - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: access-api-policy
+  namespace: pacs
+spec:
+  podSelector:
+    matchLabels:
+      app: access-api
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: load-tester
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - protocol: TCP
+      port: 8080

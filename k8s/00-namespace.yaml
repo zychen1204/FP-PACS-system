@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pacs
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pacs-sa
+  namespace: pacs
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pacs-role
+  namespace: pacs
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pacs-role-binding
+  namespace: pacs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pacs-role
+subjects:
+- kind: ServiceAccount
+  name: pacs-sa
+  namespace: pacs

@@ -1,233 +1,51 @@
-# PACS — 分散式實體門禁控制系統
+# 🏢 PACS — 分散式實體門禁控制系統
+> **Cloud-Native Physical Access Control System**
 
-Cloud-Native Physical Access Control System
+[![Status](https://img.shields.io/badge/Status-Phase_2_Completed-success.svg)]()
+[![Backend](https://img.shields.io/badge/Backend-Go_1.21-blue.svg)]()
+[![Database](https://img.shields.io/badge/Database-PostgreSQL_16-blue.svg)]()
 
-> **狀態**：HW2 §5.3 Phase 2 後端已落地（PR #2 + #3），後端整合規格（v2.1）已實作完成。Phase 2 改動詳述見
-> [`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md)、驗收見
-> [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)、前端整合指引見
-> [`docs/BACKEND_INTEGRATION.md`](docs/BACKEND_INTEGRATION.md)。
+本專案是一個現代化、具備多層級廠區與權限管理的實體門禁控制系統。它利用微服務架構，結合 Redis 進行防跟隨 (Anti-Passback) 高速驗證，並使用 PostgreSQL 進行安全的不可變稽核日誌 (Immutable Audit Logs) 儲存。
 
-## 後端 v2.1 新功能（最新）
+## 🚀 快速啟動
 
-### 門禁刷卡邏輯強化（Access API）
-
-#### 廠區隔離（Site Isolation）
-- APB 狀態以 **廠區 + tier** 為 scope（Redis key：`apb:{site_id}:{tier}:{badge_id}`）
-- 不同廠區（`site_id`）的 APB 狀態完全獨立，不互相影響
-- 前端未帶 `site_id` 時 fallback 為 `"global"`
-
-#### 雙層門禁階層驗證（Tier Hierarchy）
-- `POST /v1/swipe` 實作嚴格兩層進出邏輯：
-
-| 動作 | 條件 | 違規回應 |
-|---|---|---|
-| Tier-2 **IN** | 需先 Tier-1 IN（同廠區）| HTTP 403，`reason: "未進入外層閘門"` |
-| Tier-1 **OUT** | 需先 Tier-2 OUT（同廠區）| HTTP 403，`reason: "請先刷出內層閘門"` |
-
-- `gate_id` 格式支援 `Gate-2A`（前端）與 `2-A`（spec）兩種，自動解析 tier
-- **同 tier 任意門可互換**：1-A 進、1-B 出視為合法刷卡
-
-#### Anti-Passback
-- 以廠區 + tier 為 scope 各層獨立計算，防止連續同方向刷卡
-
-### 報表 API 更新
-
-| Endpoint | 新增/變更 |
-|---|---|
-| `GET /v1/reports/manager-team?as=<badgeID>` | 改用 `as` 查詢參數；每筆加入 `status` 欄位（`mgr-1`/`mgr-2`/`employee`）|
-| `GET /v1/reports/trend?as=<badgeID>` | 改用 `as` 查詢參數；回應格式 `{scope, trends}`（移除 `period`）|
-| `GET /v1/reports/attendance` | 每筆回應加入 `status` 欄位（`mgr-1`/`mgr-2`/`employee`）|
-
-### 資料庫更新（migration 0102）
-- `employees.is_manager BOOLEAN` 已移除，改為 `job_level VARCHAR(20)`（`STAFF` / `MANAGER_L1` / `MANAGER_L2`）
-- `MANAGER_L1`（廠長）可查看 `MANAGER_L2`（部主管）的團隊報表；反向不開放
-- `GetManagerScope` 判斷條件改為 `job_level <> 'STAFF'`
-
-### DB Partition 強化（migration 0100 / 0101）
-- 所有月份分區均自動掛載 `trg_protect_audit`（FR-12 immutability guard）
-- 新增 `access_events_default` 分區防止超出預建範圍的寫入失敗
-- 新增 `ensure_access_event_partition()` 函數供運維按需新增月份分區
-
-## 架構（Phase 2）
-
-```
-                            Badge Readers / Frontend
-                                      │
-                                      ▼
-                              ┌─────────────┐
-                              │ access-api  │   (Port 8080, 不打 DB)
-                              │  Anti-Passback│
-                              └──────┬──────┘
-                                     │
-                       ┌─────────────┼─────────────┐
-                       ▼                           ▼
-                 ┌──────────┐               ┌──────────────┐
-                 │  Redis   │               │ Redis Streams│
-                 │  Cache   │               │ pacs:events  │
-                 │  (APB)   │               └──────┬───────┘
-                 └──────────┘    (named consumer groups)
-                                                │
-                       ┌────────────────────────┼──────────────────────┐
-                       ▼                                               ▼
-              ┌────────────────┐                              ┌──────────────────┐
-              │ event-processor│                              │ anomaly-detector │
-              │   寫 access_events                            │  3 條規則 → alerts│
-              └────────┬───────┘                              └────────┬─────────┘
-                       │                                               │
-                       │  (DLQ: pacs:events:dead 在重試 3 次後)         │
-                       ▼                                               ▼
-              ┌──────────────────────────────────────────────────────────────┐
-              │              PostgreSQL 16 (append-only, 36 monthly partition)│
-              │  access_events  /  employees(org_path + org_path_ltree)       │
-              │  alerts         /  mv_daily_attendance (materialized view)    │
-              └─────────┬───────────────────────────────┬────────────────────┘
-                        │                               │
-                  ┌─────▼─────┐                  ┌──────▼──────┐
-                  │mv-refresher│                 │  org-sync   │
-                  │ 5min REFRESH│                │ LDAP→DB 同步 │
-                  └────────────┘                 └─────────────┘
-                        │
-                        ▼  (network alias: postgres-replica)
-                  ┌────────────────────┐
-                  │   reporting-api    │  (Port 8081, JWT-protected)
-                  │ /v1/reports/*      │
-                  │ /v1/audit          │
-                  │ /v1/alerts         │
-                  │ /v1/dev/login      │
-                  └────────────────────┘
-```
-
-## 快速啟動
+第一次啟動或前端有更新時，請務必加上 `--build` 以重建容器：
 
 ```bash
-# ⚠️  第一次啟動或前端有更新時，務必加 --build
-docker compose up -d --build
-sleep 25                          # 等 migrate + 各 service ready
+docker compose down -v   # 1. 下掉所有服務與容器（含volumes）
+docker compose up -d --build  # 2. 重新啟動所有服務與容器
+sleep 25  # 等待 migrate 與各服務就緒
 ```
 
 - **前端介面**: <http://localhost>
 - **Access API**: <http://localhost:8080>
 - **Reporting API**: <http://localhost:8081>
-- **完整驗收劇本**：[`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)
 
-### 前端 v2.1 升級（最新）
+## 🏗 系統架構簡介
 
-前端已從 v2.0 升級到 v2.1，包含：
-- ✅ 兩層門禁系統（外層 Gate-1A/B/C + 內層 Gate-2A/B/C）
-- ✅ **廠區 (site_id) 選擇**，刷卡帶廠區資訊
-- ✅ **主管視野**（必須輸入主管 Badge ID，MANAGER_L1/L2 權限驗證）
-- ✅ 出席報表 `status` 欄位顯示（mgr-1 / mgr-2 / employee）
-- ✅ 現代 UI 與完整數據導出（Excel）
+系統為讀寫分離的高效能設計：
+- **[寫入] Access API**: 直接與 Redis Cache 互動進行低延遲（<50ms）的 APB 驗證，並將成功或拒絕的事件丟入 Redis Stream，由後端的 Event Processor 非同步寫入資料庫。
+- **[讀取] Reporting API**: 提供 JWT 保護的報表查詢，連接 PostgreSQL。配合 Materialized View (`mv_daily_attendance`) 提供極速的主管視野統計。
 
-👉 [前端改動總結](docs/FRONTEND.md) | [後端整合規格 v2.1](docs/BACKEND_INTEGRATION.md) | [測試方法](TESTING.md)
+👉 **[查看完整架構圖與設計細節](docs/ArchitectureDesign.md#架構phase-2)**
 
-## 技術棧
+## 🛠 技術棧
 
-| 元件 | 技術 |
+| 領域 | 使用技術 |
 |------|------|
-| 前端 | HTML5 + CSS3 + JavaScript + Nginx |
-| 後端 | Go 1.21 + Gin Framework + golang-jwt/v5 + xuri/excelize/v2 |
-| 資料庫 | PostgreSQL 16 (C.UTF-8 locale, ltree, pg_stat_statements) |
-| 快取/MQ | Redis 7 (Cache + Streams + DLQ) |
-| 容器化 | Docker + Docker Compose |
-| 觀測 | pg_stat_statements + slow log + Prometheus + Grafana (PR #3) |
+| **前端** | HTML5, CSS3, JavaScript, Nginx |
+| **後端** | Go 1.21, Gin Framework, golang-jwt/v5, Excelize |
+| **資料庫** | PostgreSQL 16 (C.UTF-8, ltree, pg_stat_statements) |
+| **快取 / MQ** | Redis 7 (Cache, Streams, DLQ) |
+| **基建** | Docker, Docker Compose, Grafana/Prometheus |
 
-### 後端 service 列表
 
-| Service | Port | 角色 |
-|---|---|---|
-| `access-api` | 8080 | 門禁寫入路徑，不打 DB |
-| `event-processor` | (8082 health) | 消費 stream 寫 `access_events` |
-| `reporting-api` | 8081 | 報表 / 警報 / 匯出 / JWT 簽發 |
-| `anomaly-detector` | (8083 health) | FR-11 規則引擎、寫 `alerts` |
-| `mv-refresher` | (8084 health) | 每 5 min `REFRESH MV CONCURRENTLY` |
-| `org-sync` | (8085 health) | LDAP / AD → `employees` upsert（mock）|
+### 🌟 開發重點
+- **待辦清單**: 👉 [`docs/TodoList.md`](docs/TodoList.md) (包含前端/後端/DB的具體實作指引)
+- **資料模擬**: 👉 [`docs/SimulationGuide.md`](docs/SimulationGuide.md) (1000 人資料模擬)
 
-## 資料庫
+## 🧪 測試與驗證
 
-Schema 與 seed data 由 [golang-migrate](https://github.com/golang-migrate/migrate)
-管理，所有變更檔案放在 `scripts/migrations/`，是 single source of truth。
+本系統提供豐富的單元與端到端 (E2E) 測試機制。
+👉 **[完整手動與自動化測試詳細腳本 (docs/TestingGuide.md)](docs/TestingGuide.md)**
 
-### 啟動流程
-
-`docker compose up` 會：
-
-1. 起動 `postgres`（PG 16 + C.UTF-8），等待 `pg_isready` 健康檢查（並啟用
-   `pg_stat_statements` 與 `log_min_duration_statement=100ms`）。
-2. 起動 `migrate` 一次性 service，依序套用所有 `up` migrations（0001~0006 + 0099 dev_seed + 0100~0102）後退出。
-3. `event-processor` / `reporting-api` / `anomaly-detector` / `mv-refresher` / `org-sync`
-   等待 `migrate` 退出 0 後才啟動。
-
-### Schema 摘要
-
-| Table | 用途 | 寫入者 | 讀取者 |
-|---|---|---|---|
-| `access_events` | append-only 稽核日誌（FR-12 immutable，按月 partition）| `event-processor` | `reporting-api` |
-| `employees` | 員工主檔（`org_path` 中文 + `org_path_ltree` GiST + `job_level` VARCHAR CHECK：`STAFF`/`MANAGER_L1`/`MANAGER_L2`）| `org-sync` / 運維 | `reporting-api` |
-| `alerts` | FR-11 異常警報 | `anomaly-detector` | `reporting-api` |
-| `mv_daily_attendance` (MV) | FR-7 趨勢報表預聚合 | `mv-refresher` REFRESH | `reporting-api` |
-
-### FR-6 / FR-9 階層查詢實作
-
-Phase 2 改用 **ltree + GiST index**（HW2 §5.3 明列規格）：
-- `employees.org_path_ltree LTREE NOT NULL`，由 `trg_sync_org_path_ltree` 自動同步 `org_path`
-- 查詢用 `org_path_ltree <@ $scope::ltree`（descendant of）命中 GiST
-- API 層 pattern a：caller badge → `GetManagerScope` 取 scope，空回 403；用 scope filter 子樹
-
-舊版的 `org_path` VARCHAR 仍保留供 UI 顯示中文。詳細查詢樣板見
-[`docs/database-compliance.md`](docs/database-compliance.md) §FR-9。
-
-### 關鍵索引
-
-- `idx_events_status_date`：`(event_date, badge_id) WHERE status='SUCCESS'` — attendance 報表（partition-local 由 PG 自動傳播）
-- `idx_events_badge_eventdate`：`(badge_id, event_date DESC)` — audit trail
-- `idx_employees_org_path_gist`：employees 上的 GiST(`org_path_ltree`) — FR-6/9 ancestor
-- `idx_mv_daily_attendance_pk` UNIQUE：MV 上必需 (供 REFRESH CONCURRENTLY)
-- `idx_mv_daily_attendance_org_date` GiST：MV 上的 ltree filter
-- `idx_alerts_open_recent`：未處理優先 + 時間倒序
-- `event_date` 是普通 `DATE NOT NULL` 欄位（partition key 限制；呼叫端在
-  INSERT 顯式提供 `(event_time AT TIME ZONE 'Asia/Taipei')::date`）
-
-### 按月 partitioning
-
-`access_events` 已依 `event_date` `PARTITION BY RANGE`，預建 2025-01 ~ 2027-12
-共 **36 個月份分區**（`access_events_y2025m01` ~ `access_events_y2027m12`）。
-細節與升級脈絡：[`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md) §3.3。
-
-### 角色分工（最小權限）
-
-| 角色 | 權限 | 由誰使用 |
-|---|---|---|
-| `pacs_user` | `SELECT, INSERT` on `access_events`、`alerts`（`UPDATE/DELETE` revoke + trigger 阻擋）；`MV` owner | `event-processor` / `anomaly-detector` / `mv-refresher` / `org-sync` / `migrate` |
-| `pacs_reporter` | `SELECT` only on `access_events` / `employees` / `alerts` / `mv_daily_attendance` | `reporting-api` |
-
-`access-api` 完全不連 PostgreSQL（走 Redis cache + Stream）。
-
-### 手動備份
-
-```bash
-docker compose exec -T postgres pg_dump -U pacs_user pacs_db > backup-$(date +%Y%m%d).sql
-```
-
-### 詳細的 migration 規範
-
-請參閱 [`scripts/README.md`](scripts/README.md)。Phase 2 已落地的 partition / MV / ltree
-所有設計脈絡見 [`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md)。
-
-### 詳細文件
-
-| 文件 | 內容 |
-|---|---|
-| [`docs/database-spec.md`](docs/database-spec.md) | DB 範圍的 FR / NFR 規範蒸餾、容量估算、Phase 1/2/3 分階段目標 |
-| [`docs/database-erd.md`](docs/database-erd.md) | Mermaid ERD、欄位字典、約束、索引、觸發器、角色權限 |
-| [`docs/database-compliance.md`](docs/database-compliance.md) | spec ↔ 實作 ↔ **實測輸出**對照矩陣 |
-| [`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md) | Phase 2 後端設計改動記錄（10 section、含替代方案對照）|
-| [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md) | Phase 2 完整驗收劇本（19 section、含實測命令 / 預期 / 結論）|
-| [`docs/BACKEND_INTEGRATION.md`](docs/BACKEND_INTEGRATION.md) | 前後端整合規格 v2.1（刷卡邏輯、報表 API、警報格式）|
-| [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md) | 前端組員整合指引（API 字典、UI mockup、JS snippet）|
-
-文件索引總覽：[`docs/README.md`](docs/README.md)。
-
-## 詳細測試流程
-
-請參閱 [TESTING.md](TESTING.md) 與 [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)。
