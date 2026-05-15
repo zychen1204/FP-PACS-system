@@ -118,6 +118,40 @@ func handleSwipe(c *gin.Context) {
 	t2Scope := siteKey + ":2"
 	apbScope := siteKey + ":" + tier
 
+	// Cross-site exclusivity: a badge may only be physically inside one site at a time.
+	// Checked only on Tier-1 IN, which is the entry point of every site.
+	if req.Direction == "IN" && tier == "1" {
+		activeSite, err := redisCache.GetActiveSite(ctx, req.BadgeID)
+		if err != nil {
+			fmt.Printf("[WARN] Redis unavailable (cross-site check), fail-closed: %v\n", err)
+			c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
+				Status:    "ERROR",
+				Message:   "Access control unavailable, please retry",
+				ErrorCode: "ERR_SYSTEM_UNAVAILABLE",
+			})
+			return
+		}
+		if activeSite != "" && activeSite != siteKey {
+			atomic.AddInt64(&swipeFail, 1)
+			reason := fmt.Sprintf("已在廠區 %s 內，請先刷出", activeSite)
+			if !publishSwipeEvent(c, models.AccessEvent{
+				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
+				Direction: req.Direction, Status: "REJECTED_APB",
+				Reason: reason, Timestamp: time.Now().UTC(),
+			}) {
+				return
+			}
+			fmt.Printf("[REJECTED] Cross-site: %s still inside %s, blocked at %s\n", req.BadgeID, activeSite, siteKey)
+			c.JSON(http.StatusForbidden, models.SwipeResponse{
+				Status:    "REJECTED_APB",
+				Reason:    reason,
+				Message:   "Badge already checked in at another site",
+				ErrorCode: "ERR_CROSS_SITE",
+			})
+			return
+		}
+	}
+
 	// Strict tier hierarchy (no cascade):
 	// IN:  Tier-2 requires Tier-1 already IN (same site).
 	// OUT: Tier-1 requires Tier-2 already OUT or never entered (same site).
@@ -228,6 +262,15 @@ func handleSwipe(c *gin.Context) {
 		return
 	}
 	atomic.AddInt64(&swipeOK, 1)
+
+	// Keep active_site in sync with Tier-1 state.
+	if tier == "1" {
+		if req.Direction == "IN" {
+			_ = redisCache.SetActiveSite(ctx, req.BadgeID, siteKey)
+		} else {
+			_ = redisCache.ClearActiveSite(ctx, req.BadgeID)
+		}
+	}
 
 	fmt.Printf("[SUCCESS] %s %s at %s/%s\n", req.BadgeID, req.Direction, siteKey, req.GateID)
 	c.JSON(http.StatusOK, models.SwipeResponse{

@@ -113,6 +113,29 @@ func (r *RedisCache) SetDirectionAndPublishEvent(ctx context.Context, scope, bad
 	return err
 }
 
+// GetActiveSite returns the site_id the badge is currently checked in to.
+// Returns "" if the badge is not inside any site.
+func (r *RedisCache) GetActiveSite(ctx context.Context, badgeID string) (string, error) {
+	key := fmt.Sprintf("active_site:%s", badgeID)
+	site, err := r.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return site, err
+}
+
+// SetActiveSite records that a badge has entered the given site (Tier-1 IN).
+func (r *RedisCache) SetActiveSite(ctx context.Context, badgeID, siteID string) error {
+	key := fmt.Sprintf("active_site:%s", badgeID)
+	return r.client.Set(ctx, key, siteID, 24*time.Hour).Err()
+}
+
+// ClearActiveSite removes the active site record when a badge exits Tier-1.
+func (r *RedisCache) ClearActiveSite(ctx context.Context, badgeID string) error {
+	key := fmt.Sprintf("active_site:%s", badgeID)
+	return r.client.Del(ctx, key).Err()
+}
+
 // Close closes the Redis connection
 func (r *RedisCache) Close() error {
 	return r.client.Close()
