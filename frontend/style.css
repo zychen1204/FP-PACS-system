@@ -13,6 +13,12 @@
     --danger: #ef4444;
     --info: #0891b2;
 
+    /* Badge Roles */
+    --mgr-1-bg: rgba(220, 38, 38, 0.2);
+    --mgr-1-color: #ef4444;
+    --mgr-2-bg: rgba(30, 64, 175, 0.2);
+    --mgr-2-color: #60a5fa;
+
     /* Backgrounds */
     --bg-dark: #0f172a;
     --bg-card: #1e293b;
@@ -1246,6 +1252,9 @@ hr {
     font-weight: bold;
     display: inline-block;
 }
+
+.badge-role.mgr-1 { background-color: rgba(220, 38, 38, 0.2); color: #ef4444; border: 1px solid #ef4444; }
+.badge-role.mgr-2 { background-color: rgba(30, 64, 175, 0.2); color: #60a5fa; border: 1px solid #3b82f6; }
 
 .badge-role.manager {
     background-color: rgba(30, 64, 175, 0.2);

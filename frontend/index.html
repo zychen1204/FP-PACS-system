@@ -86,9 +86,24 @@
                             <p>模擬員工在外層/內層閘門的刷卡動作</p>
                         </div>
 
+                        <div class="form-row" style="margin-bottom: 25px;">
+                            <div class="form-group" style="flex: 1; margin-right: 15px;">
+                                <label for="site-id">廠區</label>
+                                <select id="site-id">
+                                    <option value="Fab12">Fab12</option>
+                                    <option value="Fab15">Fab15</option>
+                                    <option value="總部">總部</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label for="badge-id">員工證件 ID</label>
+                                <input type="text" id="badge-id" placeholder="例: B001、B100" value="B001">
+                            </div>
+                        </div>
+
                         <!-- Gate Selection (2-tier) -->
                         <div class="gate-section">
-                            <h4>選擇閘門層級</h4>
+                            <h4>選擇閘門與位置</h4>
                             <div class="tier-selector">
                                 <button class="tier-btn active" data-tier="outer">
                                     <span class="tier-icon">1️⃣</span>
@@ -104,31 +119,15 @@
                         <!-- Form -->
                         <div class="form-section">
                             <div class="form-group">
-                                <label for="badge-id">員工證件 ID</label>
-                                <input type="text" id="badge-id" placeholder="例: B001、B100" value="B001">
-                            </div>
-
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="site-id">廠區</label>
-                                    <select id="site-id">
-                                        <option value="Site-A">Site-A (Fab12)</option>
-                                        <option value="Site-B">Site-B (Fab15)</option>
-                                        <option value="Site-C">Site-C (總部)</option>
-                                    </select>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="gate-id">閘門</label>
-                                    <select id="gate-id">
-                                        <option value="Gate-1A">Gate-1A (外層)</option>
-                                        <option value="Gate-1B">Gate-1B (外層)</option>
-                                        <option value="Gate-1C">Gate-1C (外層)</option>
-                                        <option value="Gate-2A">Gate-2A (內層)</option>
-                                        <option value="Gate-2B">Gate-2B (內層)</option>
-                                        <option value="Gate-2C">Gate-2C (內層)</option>
-                                    </select>
-                                </div>
+                                <label for="gate-id">閘門</label>
+                                <select id="gate-id">
+                                    <option value="Gate-1A">Gate-1A (外層)</option>
+                                    <option value="Gate-1B">Gate-1B (外層)</option>
+                                    <option value="Gate-1C">Gate-1C (外層)</option>
+                                    <option value="Gate-2A">Gate-2A (內層)</option>
+                                    <option value="Gate-2B">Gate-2B (內層)</option>
+                                    <option value="Gate-2C">Gate-2C (內層)</option>
+                                </select>
                             </div>
 
                             <div class="form-group">

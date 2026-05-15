@@ -11,14 +11,25 @@
     ```json
     {
       "badge_id": "B001",
-      "gate_id": "1-A",        // 格式：[層級]-[編號]
+      "site_id": "FAB12-A",    // 廠區 ID (例: FAB12-A)
+      "gate_id": "Gate-1A",    // 格式：Gate-[層級][編號]
       "direction": "IN"        // IN (進入) 或 OUT (離開)
     }
     ```
 *   **後端應該做什麼 (Logic)**
-    1.  **階層驗證**：依照「外層 (Tier 1) -> 緩衝區 -> 內層 (Tier 2)」邏輯。必須先 IN 刷過外層，才能 IN 刷內層。
+    1.  **階層與路徑驗證**：
+        - **進入 (IN)**: 必須先刷過「外層 (Tier 1)」閘門 (Gate-1A/B/C 中的任一門) 進入緩衝區，才能刷「內層 (Tier 2)」閘門 (Gate-2A/B/C 中的任一門) 進入核心區。
+        - **層級內通用性 (Any Gate)**: 1-A、1-B、1-C 對於 Tier 1 存取是等效且可互換的；2-A、2-B、2-C 對於 Tier 2 存取亦同。驗證機制應針對「層級 (Tier)」而非特定「閘門 ID」。
+        - **離開 (OUT)**: 若在核心區，必須先刷過任一「內層 (Tier 2)」閘門回到緩衝區，才能刷任一「外層 (Tier 1)」閘門離開廠區。
     2.  **Anti-Passback**：防止連續兩次同方向刷卡。
-    3.  **架構參考**：
+    3.  **區域流轉表**：
+        | 方向 | 起點區域 | 目的區域 | 刷卡閘門 |
+        | :--- | :--- | :--- | :--- |
+        | IN | 外部 | 緩衝區 | Tier 1 (Gate-1A/B/C) |
+        | IN | 緩衝區 | 核心區 | Tier 2 (Gate-2A/B/C) |
+        | OUT | 核心區 | 緩衝區 | Tier 2 (Gate-2A/B/C) |
+        | OUT | 緩衝區 | 外部 | Tier 1 (Gate-1A/B/C) |
+    4.  **架構參考**：
         ```text
                           外部區域 (Outside Area)
                +---------------[門 1-A]---------------+
@@ -45,7 +56,7 @@
     *   `as`: 主管 Badge ID (例: `B100`)
     *   `date`: 查詢日期 (例: `2026-05-14`)
 *   **後端應該做什麼 (Logic)**
-    1.  驗證 `as` 是否具備主管權限 (`is_manager=true`)，若無則回傳 **403**。
+    1.  驗證 `as` 是否具備主管權限 (`status` 為 `mgr-1` 或 `mgr-2`)，若無則回傳 **403**。
     2.  根據主管的 `org_path` 查詢其下屬所有層級員工的出席紀錄。
 *   **後端應傳輸格式 (Output)**
     ```json
@@ -55,7 +66,7 @@
         {
           "employee_id": "B001",
           "name": "王小明",
-          "is_manager": false,
+          "status": "employee",    // mgr-1, mgr-2, employee
           "org_path": "TSMC.Fab12.MFG.P1",
           "work_date": "2026-05-14",
           "first_in": "2026-05-14T08:00:00Z",
@@ -101,10 +112,11 @@
     [
       {
         "id": 101,
+        "alert_type": "APB_VIOLATION",
         "severity": "CRITICAL",
-        "message": "員工 B005 違規進入內層 (未經過外層)",
-        "gate_id": "2-A",
-        "timestamp": "2026-05-14T10:00:00Z"
+        "badge_id": "B005",
+        "details": "員工 B005 違規進入內層 (未經過外層)",
+        "occurred_at": "2026-05-14T10:00:00Z"
       }
     ]
     ```
