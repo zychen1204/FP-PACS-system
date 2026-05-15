@@ -34,7 +34,7 @@ type AccessEvent struct {
 type AttendanceReport struct {
 	EmployeeID string     `json:"employee_id"`
 	Name       string     `json:"name"`
-	IsManager  bool       `json:"is_manager"`
+	Status     string     `json:"status"` // "mgr-1", "mgr-2", or "employee"
 	OrgPath    string     `json:"org_path"`
 	WorkDate   string     `json:"work_date"`
 	FirstIn    *time.Time `json:"first_in,omitempty"`

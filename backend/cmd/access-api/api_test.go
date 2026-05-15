@@ -65,19 +65,25 @@ func newTestRouter() *gin.Engine {
 }
 
 // swipeJSON returns a JSON body for /v1/swipe.
-func swipeJSON(badgeID, gateID, direction string) *bytes.Buffer {
+func swipeJSON(badgeID, siteID, gateID, direction string) *bytes.Buffer {
 	b, _ := json.Marshal(map[string]string{
 		"badge_id":  badgeID,
+		"site_id":   siteID,
 		"gate_id":   gateID,
 		"direction": direction,
 	})
 	return bytes.NewBuffer(b)
 }
 
-// doSwipe is a helper that fires one POST /v1/swipe and returns the recorder.
+// doSwipe fires one POST /v1/swipe using site "Site-A" by default.
 func doSwipe(r *gin.Engine, badgeID, gateID, direction string) *httptest.ResponseRecorder {
+	return doSwipeAt(r, badgeID, "Site-A", gateID, direction)
+}
+
+// doSwipeAt fires one POST /v1/swipe with an explicit site_id.
+func doSwipeAt(r *gin.Engine, badgeID, siteID, gateID, direction string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/swipe", swipeJSON(badgeID, gateID, direction))
+	req, _ := http.NewRequest("POST", "/v1/swipe", swipeJSON(badgeID, siteID, gateID, direction))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	return w
@@ -202,7 +208,7 @@ func TestHandleSwipe_APBRejection_AlsoPublishesToStream(t *testing.T) {
 func TestHandleSwipe_MissingBadgeID_Returns400(t *testing.T) {
 	r := newTestRouter()
 	w := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"gate_id":"1-A","direction":"IN"}`)
+	body := bytes.NewBufferString(`{"site_id":"Site-A","gate_id":"1-A","direction":"IN"}`)
 	req, _ := http.NewRequest("POST", "/v1/swipe", body)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -280,19 +286,53 @@ func TestHandleSwipe_Tier2IN_AfterTier1IN_Returns200(t *testing.T) {
 	}
 }
 
-// Swiping OUT at tier-1 must cascade tier-2 to OUT.
-// Scenario: badge enters 1-A, enters 2-A, exits 1-A (without swiping 2-A OUT),
-// then re-enters 1-A and tries 2-A again — should be allowed, not APB-blocked.
-func TestHandleSwipe_Tier1Out_CascadesTier2Out(t *testing.T) {
+// Strict exit: Tier-1 OUT is rejected while Tier-2 is still IN.
+func TestHandleSwipe_Tier1OUT_BlockedIfTier2StillIN(t *testing.T) {
 	r := newTestRouter()
-	doSwipe(r, "CASCADE_B", "1-A", "IN")  // enter tier-1
-	doSwipe(r, "CASCADE_B", "2-A", "IN")  // enter tier-2
-	doSwipe(r, "CASCADE_B", "1-A", "OUT") // exit tier-1 (should cascade tier-2 → OUT)
+	doSwipe(r, "STRICT_B", "1-A", "IN") // enter outer
+	doSwipe(r, "STRICT_B", "2-A", "IN") // enter inner
+	w := doSwipe(r, "STRICT_B", "1-A", "OUT")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status got=%d want=403: tier-1 OUT should fail if tier-2 still IN", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error_code"] != "ERR_TIER_VIOLATION" {
+		t.Errorf("error_code got=%q want=ERR_TIER_VIOLATION", resp["error_code"])
+	}
+}
 
-	doSwipe(r, "CASCADE_B", "1-A", "IN") // re-enter tier-1 next day
-	w := doSwipe(r, "CASCADE_B", "2-A", "IN")
+// Correct exit order: OUT inner first, then outer.
+func TestHandleSwipe_CorrectExitOrder_Returns200(t *testing.T) {
+	r := newTestRouter()
+	doSwipe(r, "ORDER_B", "1-A", "IN")  // enter outer
+	doSwipe(r, "ORDER_B", "2-A", "IN")  // enter inner
+	doSwipe(r, "ORDER_B", "2-A", "OUT") // exit inner first
+	w := doSwipe(r, "ORDER_B", "1-A", "OUT")
 	if w.Code != http.StatusOK {
-		t.Fatalf("status got=%d want=200: tier-2 entry should succeed after tier-1 OUT cascade", w.Code)
+		t.Fatalf("status got=%d want=200: tier-1 OUT after tier-2 OUT should succeed", w.Code)
+	}
+}
+
+// Site isolation: APB state is independent per site.
+func TestHandleSwipe_SiteSeparation_IndependentAPB(t *testing.T) {
+	r := newTestRouter()
+	doSwipeAt(r, "SITE_B", "Site-A", "1-A", "IN") // IN at Site-A
+
+	// Same badge, same gate, same direction but DIFFERENT site → should be allowed
+	w := doSwipeAt(r, "SITE_B", "Site-B", "1-A", "IN")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status got=%d want=200: different site should have independent APB", w.Code)
+	}
+}
+
+// Within the same tier, any gate letter is valid for exit (1-A in, 1-B out).
+func TestHandleSwipe_SameTier_CrossGate_AllowedOut(t *testing.T) {
+	r := newTestRouter()
+	doSwipe(r, "CROSS_B", "1-A", "IN") // enter via gate A
+	w := doSwipe(r, "CROSS_B", "1-B", "OUT")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status got=%d want=200: exit through same-tier different gate should be allowed", w.Code)
 	}
 }
 

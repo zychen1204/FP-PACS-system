@@ -2,10 +2,51 @@
 
 Cloud-Native Physical Access Control System
 
-> **狀態**：HW2 §5.3 Phase 2 後端已落地（PR #2 + #3）。Phase 2 改動詳述見
+> **狀態**：HW2 §5.3 Phase 2 後端已落地（PR #2 + #3），後端整合規格（v2.1）已實作完成。Phase 2 改動詳述見
 > [`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md)、驗收見
 > [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)、前端整合指引見
-> [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md)。
+> [`docs/BACKEND_INTEGRATION.md`](docs/BACKEND_INTEGRATION.md)。
+
+## 後端 v2.1 新功能（最新）
+
+### 門禁刷卡邏輯強化（Access API）
+
+#### 廠區隔離（Site Isolation）
+- APB 狀態以 **廠區 + tier** 為 scope（Redis key：`apb:{site_id}:{tier}:{badge_id}`）
+- 不同廠區（`site_id`）的 APB 狀態完全獨立，不互相影響
+- 前端未帶 `site_id` 時 fallback 為 `"global"`
+
+#### 雙層門禁階層驗證（Tier Hierarchy）
+- `POST /v1/swipe` 實作嚴格兩層進出邏輯：
+
+| 動作 | 條件 | 違規回應 |
+|---|---|---|
+| Tier-2 **IN** | 需先 Tier-1 IN（同廠區）| HTTP 403，`reason: "未進入外層閘門"` |
+| Tier-1 **OUT** | 需先 Tier-2 OUT（同廠區）| HTTP 403，`reason: "請先刷出內層閘門"` |
+
+- `gate_id` 格式支援 `Gate-2A`（前端）與 `2-A`（spec）兩種，自動解析 tier
+- **同 tier 任意門可互換**：1-A 進、1-B 出視為合法刷卡
+
+#### Anti-Passback
+- 以廠區 + tier 為 scope 各層獨立計算，防止連續同方向刷卡
+
+### 報表 API 更新
+
+| Endpoint | 新增/變更 |
+|---|---|
+| `GET /v1/reports/manager-team?as=<badgeID>` | 改用 `as` 查詢參數；每筆加入 `status` 欄位（`mgr-1`/`mgr-2`/`employee`）|
+| `GET /v1/reports/trend?as=<badgeID>` | 改用 `as` 查詢參數；回應格式 `{scope, trends}`（移除 `period`）|
+| `GET /v1/reports/attendance` | 每筆回應加入 `status` 欄位（`mgr-1`/`mgr-2`/`employee`）|
+
+### 資料庫更新（migration 0102）
+- `employees.is_manager BOOLEAN` 已移除，改為 `job_level VARCHAR(20)`（`STAFF` / `MANAGER_L1` / `MANAGER_L2`）
+- `MANAGER_L1`（廠長）可查看 `MANAGER_L2`（部主管）的團隊報表；反向不開放
+- `GetManagerScope` 判斷條件改為 `job_level <> 'STAFF'`
+
+### DB Partition 強化（migration 0100 / 0101）
+- 所有月份分區均自動掛載 `trg_protect_audit`（FR-12 immutability guard）
+- 新增 `access_events_default` 分區防止超出預建範圍的寫入失敗
+- 新增 `ensure_access_event_partition()` 函數供運維按需新增月份分區
 
 ## 架構（Phase 2）
 
@@ -69,15 +110,16 @@ sleep 25                          # 等 migrate + 各 service ready
 - **Reporting API**: <http://localhost:8081>
 - **完整驗收劇本**：[`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md)
 
-### 前端 v2.0 升級（新）
+### 前端 v2.1 升級（最新）
 
-前端已從 v1.0 升級到 v2.0，包含：
-- ✅ 兩層門禁系統 (外層1-A/B/C + 內層2-A/B/C)
-- ✅ **主管視野**（必須輸入主管ID，權限驗證）
-- ✅ 現代UI
-- ✅ 完整數據導出（Excel）
+前端已從 v2.0 升級到 v2.1，包含：
+- ✅ 兩層門禁系統（外層 Gate-1A/B/C + 內層 Gate-2A/B/C）
+- ✅ **廠區 (site_id) 選擇**，刷卡帶廠區資訊
+- ✅ **主管視野**（必須輸入主管 Badge ID，MANAGER_L1/L2 權限驗證）
+- ✅ 出席報表 `status` 欄位顯示（mgr-1 / mgr-2 / employee）
+- ✅ 現代 UI 與完整數據導出（Excel）
 
-👉 [前端v2.0改動總結](docs/FRONTEND.md) | [後端整合規格](docs/BACKEND_INTEGRATION.md) | [測試方法](TESTING.md#-前端測試流程-pacs-frontend-v20)
+👉 [前端改動總結](docs/FRONTEND.md) | [後端整合規格 v2.1](docs/BACKEND_INTEGRATION.md) | [測試方法](TESTING.md)
 
 ## 技術棧
 
@@ -112,7 +154,7 @@ Schema 與 seed data 由 [golang-migrate](https://github.com/golang-migrate/migr
 
 1. 起動 `postgres`（PG 16 + C.UTF-8），等待 `pg_isready` 健康檢查（並啟用
    `pg_stat_statements` 與 `log_min_duration_statement=100ms`）。
-2. 起動 `migrate` 一次性 service，依序套用所有 `up` migrations（0001~0006 + 0099 dev_seed）後退出。
+2. 起動 `migrate` 一次性 service，依序套用所有 `up` migrations（0001~0006 + 0099 dev_seed + 0100~0102）後退出。
 3. `event-processor` / `reporting-api` / `anomaly-detector` / `mv-refresher` / `org-sync`
    等待 `migrate` 退出 0 後才啟動。
 
@@ -181,6 +223,7 @@ docker compose exec -T postgres pg_dump -U pacs_user pacs_db > backup-$(date +%Y
 | [`docs/database-compliance.md`](docs/database-compliance.md) | spec ↔ 實作 ↔ **實測輸出**對照矩陣 |
 | [`docs/PHASE2_CHANGES.md`](docs/PHASE2_CHANGES.md) | Phase 2 後端設計改動記錄（10 section、含替代方案對照）|
 | [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md) | Phase 2 完整驗收劇本（19 section、含實測命令 / 預期 / 結論）|
+| [`docs/BACKEND_INTEGRATION.md`](docs/BACKEND_INTEGRATION.md) | 前後端整合規格 v2.1（刷卡邏輯、報表 API、警報格式）|
 | [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md) | 前端組員整合指引（API 字典、UI mockup、JS snippet）|
 
 文件索引總覽：[`docs/README.md`](docs/README.md)。
