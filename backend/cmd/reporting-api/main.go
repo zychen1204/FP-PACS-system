@@ -137,12 +137,12 @@ func getAuditTrail(c *gin.Context) {
 }
 
 // getManagerTeamReport — FR-6 / FR-9 pattern a：
-// (1) caller badge → manager scope；空結果 → 403。
+// (1) ?as=<badge_id> → lookup manager scope；空結果 → 403。
 // (2) 用 scope ltree `<@` 過濾 mv_daily_attendance 取子樹。
 func getManagerTeamReport(c *gin.Context) {
-	badgeID, ok := auth.BadgeIDFromCtx(c)
-	if !ok || badgeID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing badge_id in token"})
+	badgeID := c.Query("as")
+	if badgeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "as (manager badge_id) is required"})
 		return
 	}
 	scope, err := database.GetManagerScope(c.Request.Context(), badgeID)
@@ -167,15 +167,15 @@ func getManagerTeamReport(c *gin.Context) {
 }
 
 // getAttendanceTrend — FR-7：日/週/月/季彙總，讀 mv_daily_attendance。
-// 若 caller 是 manager，限縮在自身 org scope；否則不限制（demo 用，正式環境視 RBAC 設計再加 filter）。
+// ?as=<badge_id> 若該 badge 是 manager，限縮在其 org scope；否則不限制。
 func getAttendanceTrend(c *gin.Context) {
 	period := c.DefaultQuery("period", "day")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 
 	var scope string
-	if badgeID, ok := auth.BadgeIDFromCtx(c); ok && badgeID != "" {
-		if s, err := database.GetManagerScope(c.Request.Context(), badgeID); err == nil && s != "" {
+	if asID := c.Query("as"); asID != "" {
+		if s, err := database.GetManagerScope(c.Request.Context(), asID); err == nil && s != "" {
 			scope = s
 		}
 	}
@@ -188,7 +188,7 @@ func getAttendanceTrend(c *gin.Context) {
 	if trends == nil {
 		trends = []models.AttendanceTrend{}
 	}
-	c.JSON(http.StatusOK, gin.H{"period": period, "scope": scope, "trends": trends})
+	c.JSON(http.StatusOK, gin.H{"scope": scope, "trends": trends})
 }
 
 // exportAttendance — FR-8：產出 Excel（xlsx），PDF 延後。

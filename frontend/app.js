@@ -24,6 +24,19 @@ const state = {
     serverOnline: false
 };
 
+// Helper Functions
+function getRoleBadge(report) {
+    const status = report.status || (report.is_manager ? 'mgr-2' : 'employee');
+    const roles = {
+        'mgr-1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+        'mgr-2': { label: '👔 二級主管', class: 'mgr-2' },
+        'mgr-3': { label: '📈 三級主管', class: 'mgr-3' },
+        'employee': { label: '👤 員工', class: 'employee' }
+    };
+    const role = roles[status] || roles['employee'];
+    return `<span class="badge-role ${role.class}">${role.label}</span>`;
+}
+
 // ============ INITIALIZATION ============
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
@@ -163,7 +176,7 @@ function getReportUrl() {
 // ============ SWIPE REQUEST ============
 async function sendSwipe() {
     const badgeId = document.getElementById('badge-id')?.value?.trim();
-    const siteId = document.getElementById('site-id')?.value;
+    const siteId = document.getElementById('site-id')?.value || 'FAB12-A';
     const gateId = document.getElementById('gate-id')?.value;
     
     if (!badgeId) {
@@ -211,7 +224,8 @@ function displaySwipeResponse(status, data, payload) {
     
     if (isSuccess) {
         successDiv.classList.remove('hidden');
-        document.getElementById('swipe-success-msg').textContent = `${directionText}【${payload.gate_id}】刷卡成功`;
+        const siteText = payload?.site_id ? `${payload.site_id} ` : '';
+        document.getElementById('swipe-success-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡成功`;
         
         // Reset animation by removing and re-adding elements
         const oldCircle = successDiv.querySelector('.checkmark-circle');
@@ -219,8 +233,9 @@ function displaySwipeResponse(status, data, payload) {
         oldCircle.parentNode.replaceChild(newCircle, oldCircle);
     } else {
         failDiv.classList.remove('hidden');
+        const siteText = payload?.site_id ? `${payload.site_id} ` : '';
         const reason = data.reason ? `${data.reason} - ` : '';
-        document.getElementById('swipe-fail-msg').textContent = `${directionText}【${payload.gate_id}】刷卡失敗 (${data.reason || '拒絕通行'})`;
+        document.getElementById('swipe-fail-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡失敗 (${data.reason || '拒絕通行'})`;
         
         // Reset animation by removing and re-adding elements
         const oldCircle = failDiv.querySelector('.cross-circle');
@@ -435,7 +450,7 @@ function displayAttendanceReport(reports) {
     `;
     
     tbody.innerHTML = reports.map(report => {
-        const identity = (report.is_manager || report.role === 'manager') ? '<span class="badge-role manager">👔 主管</span>' : '<span class="badge-role employee">👤 員工</span>';
+        const identity = getRoleBadge(report);
         return `
         <tr>
             <td>${report.employee_id}</td>
@@ -447,8 +462,8 @@ function displayAttendanceReport(reports) {
             <td>${formatTime(report.last_out)}</td>
             <td><strong>${report.swipe_count}</strong></td>
             <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
-        </tr>
-    `}).join('');
+        </tr>`;
+    }).join('');
 }
 
 function displayAttendanceError(message) {
@@ -534,7 +549,7 @@ function displayManagerTeam(data) {
     }
     
     tbody.innerHTML = reports.map(report => {
-        const identity = (report.is_manager || report.role === 'manager') ? '<span class="badge-role manager">👔 主管</span>' : '<span class="badge-role employee">👤 員工</span>';
+        const identity = getRoleBadge(report);
         return `
         <tr>
             <td>${report.employee_id}</td>
@@ -547,7 +562,8 @@ function displayManagerTeam(data) {
             <td><strong>${report.swipe_count}</strong></td>
             <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
         </tr>
-    `}).join('');
+    `;
+    }).join('');
 }
 
 function displayManagerError(message) {

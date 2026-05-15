@@ -170,8 +170,10 @@ func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree,
 		SELECT mv.badge_id, mv.name, mv.org_path,
 		       mv.event_date::text AS work_date,
 		       mv.first_in, mv.last_out, mv.swipe_count,
-		       COALESCE(mv.stay_hours, 0)::float8 AS stay_hours
+		       COALESCE(mv.stay_hours, 0)::float8 AS stay_hours,
+		       COALESCE(emp.is_manager, false) AS is_manager
 		FROM mv_daily_attendance mv
+		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
 		WHERE mv.org_path_ltree <@ $1::ltree
 	`
 	args := []interface{}{scopeLtree}
@@ -190,7 +192,7 @@ func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree,
 	var reports []models.AttendanceReport
 	for rows.Next() {
 		var r models.AttendanceReport
-		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.StayHours); err != nil {
+		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.StayHours, &r.IsManager); err != nil {
 			return nil, err
 		}
 		reports = append(reports, r)

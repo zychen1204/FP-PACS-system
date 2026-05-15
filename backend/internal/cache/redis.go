@@ -56,9 +56,10 @@ func NewRedisCache() (*RedisCache, error) {
 }
 
 // CheckAntiPassback checks if a badge swipe violates anti-passback rules.
+// scope is a namespace for the APB key (e.g., gate tier "1" or "2").
 // Returns true if the swipe is allowed, false if it violates APB.
-func (r *RedisCache) CheckAntiPassback(ctx context.Context, siteID, badgeID, direction string) (bool, error) {
-	key := fmt.Sprintf("apb:%s:%s", siteID, badgeID)
+func (r *RedisCache) CheckAntiPassback(ctx context.Context, scope, badgeID, direction string) (bool, error) {
+	key := fmt.Sprintf("apb:%s:%s", scope, badgeID)
 
 	lastDir, err := r.client.Get(ctx, key).Result()
 	if err == redis.Nil {
@@ -75,22 +76,33 @@ func (r *RedisCache) CheckAntiPassback(ctx context.Context, siteID, badgeID, dir
 	return true, nil
 }
 
+// GetState returns the last recorded direction for a badge in the given scope.
+// Returns "" if no record exists. Used for tier hierarchy validation.
+func (r *RedisCache) GetState(ctx context.Context, scope, badgeID string) (string, error) {
+	key := fmt.Sprintf("apb:%s:%s", scope, badgeID)
+	state, err := r.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return state, err
+}
+
 // SetDirection updates the last known direction for anti-passback
-func (r *RedisCache) SetDirection(ctx context.Context, siteID, badgeID, direction string) error {
-	key := fmt.Sprintf("apb:%s:%s", siteID, badgeID)
+func (r *RedisCache) SetDirection(ctx context.Context, scope, badgeID, direction string) error {
+	key := fmt.Sprintf("apb:%s:%s", scope, badgeID)
 	return r.client.Set(ctx, key, direction, 24*time.Hour).Err()
 }
 
 // SetDirectionAndPublishEvent atomically updates APB state and appends the
 // access event to the Redis Stream. This keeps the success response from
 // observing a half-written Redis state.
-func (r *RedisCache) SetDirectionAndPublishEvent(ctx context.Context, siteID, badgeID, direction, streamName string, event models.AccessEvent) error {
+func (r *RedisCache) SetDirectionAndPublishEvent(ctx context.Context, scope, badgeID, direction, streamName string, event models.AccessEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
 
-	key := fmt.Sprintf("apb:%s:%s", siteID, badgeID)
+	key := fmt.Sprintf("apb:%s:%s", scope, badgeID)
 	pipe := r.client.TxPipeline()
 	pipe.Set(ctx, key, direction, 24*time.Hour)
 	pipe.XAdd(ctx, &redis.XAddArgs{
