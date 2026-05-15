@@ -30,6 +30,8 @@ function getRoleBadge(report) {
     const roles = {
         'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
         'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+        'mgr-1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+        'mgr-2': { label: '👔 二級主管', class: 'mgr-2' },
         'STAFF': { label: '👤 員工', class: 'employee' },
         'employee': { label: '👤 員工', class: 'employee' }
     };
