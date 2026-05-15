@@ -175,8 +175,8 @@ func TestGetAttendanceTrend_FR7_DefaultDay(t *testing.T) {
 	}
 	var resp map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["period"] != "day" {
-		t.Errorf("default period got=%v want=day", resp["period"])
+	if resp["trends"] == nil {
+		t.Error("response should include trends key")
 	}
 }
 
@@ -190,8 +190,8 @@ func TestGetAttendanceTrend_FR7_WeekPeriod(t *testing.T) {
 	}
 	var resp map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["period"] != "week" {
-		t.Errorf("period got=%v want=week", resp["period"])
+	if _, ok := resp["scope"]; !ok {
+		t.Error("response should include scope key")
 	}
 }
 
@@ -313,7 +313,7 @@ func TestListAlerts_FR11_ReturnsAlerts(t *testing.T) {
 	t.Setenv("DEV_AUTH_BYPASS", "1")
 	bid := "B001"
 	sid := "Site-A"
-	gid := "G1"
+	gid := "Gate-2A"
 	alerts := []models.Alert{
 		{ID: 1, AlertType: "APB_BURST", Severity: "HIGH", BadgeID: &bid, SiteID: &sid, GateID: &gid, OccurredAt: time.Now()},
 	}

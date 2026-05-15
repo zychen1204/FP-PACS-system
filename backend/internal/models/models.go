@@ -5,7 +5,7 @@ import "time"
 // SwipeRequest represents an incoming badge swipe request
 type SwipeRequest struct {
 	BadgeID   string `json:"badge_id" binding:"required"`
-	SiteID    string `json:"site_id" binding:"required"`
+	SiteID    string `json:"site_id"`  // optional, forwarded from frontend for DB storage
 	GateID    string `json:"gate_id" binding:"required"`
 	Direction string `json:"direction" binding:"required,oneof=IN OUT"`
 }
@@ -13,7 +13,8 @@ type SwipeRequest struct {
 // SwipeResponse represents the response to a swipe request
 type SwipeResponse struct {
 	Status    string `json:"status"`
-	Message   string `json:"message"`
+	Message   string `json:"message,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
@@ -33,6 +34,7 @@ type AccessEvent struct {
 type AttendanceReport struct {
 	EmployeeID string     `json:"employee_id"`
 	Name       string     `json:"name"`
+	IsManager  bool       `json:"is_manager"`
 	OrgPath    string     `json:"org_path"`
 	WorkDate   string     `json:"work_date"`
 	FirstIn    *time.Time `json:"first_in,omitempty"`

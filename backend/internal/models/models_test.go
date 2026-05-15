@@ -9,7 +9,7 @@ import (
 // ── SwipeRequest ───────────────────────────────────────────────────────────
 
 func TestSwipeRequest_JSONRoundtrip(t *testing.T) {
-	want := SwipeRequest{BadgeID: "B001", SiteID: "Site-A", GateID: "G1", Direction: "IN"}
+	want := SwipeRequest{BadgeID: "B001", SiteID: "Site-A", GateID: "Gate-1A", Direction: "IN"}
 	b, _ := json.Marshal(want)
 	var got SwipeRequest
 	json.Unmarshal(b, &got)
@@ -19,7 +19,7 @@ func TestSwipeRequest_JSONRoundtrip(t *testing.T) {
 }
 
 func TestSwipeRequest_JSONFieldNames(t *testing.T) {
-	req := SwipeRequest{BadgeID: "B001", SiteID: "Site-A", GateID: "G1", Direction: "IN"}
+	req := SwipeRequest{BadgeID: "B001", SiteID: "Site-A", GateID: "Gate-1A", Direction: "IN"}
 	b, _ := json.Marshal(req)
 	var m map[string]interface{}
 	json.Unmarshal(b, &m)
