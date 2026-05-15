@@ -26,14 +26,14 @@ const state = {
 
 // Helper Functions
 function getRoleBadge(report) {
-    const status = report.status || (report.is_manager ? 'mgr-2' : 'employee');
+    const status = report.status || (report.job_level) || (report.is_manager ? 'MANAGER_L2' : 'STAFF');
     const roles = {
-        'mgr-1': { label: '🎖️ 一級主管', class: 'mgr-1' },
-        'mgr-2': { label: '👔 二級主管', class: 'mgr-2' },
-        'mgr-3': { label: '📈 三級主管', class: 'mgr-3' },
+        'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+        'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+        'STAFF': { label: '👤 員工', class: 'employee' },
         'employee': { label: '👤 員工', class: 'employee' }
     };
-    const role = roles[status] || roles['employee'];
+    const role = roles[status] || roles['STAFF'];
     return `<span class="badge-role ${role.class}">${role.label}</span>`;
 }
 
