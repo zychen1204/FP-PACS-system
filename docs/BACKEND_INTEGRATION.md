@@ -45,8 +45,8 @@
     *   `as`: 主管 Badge ID (例: `B100`)
     *   `date`: 查詢日期 (例: `2026-05-14`)
 *   **後端應該做什麼 (Logic)**
-    1.  驗證 `as` 是否具備主管權限 (`is_manager=true`)，若無則回傳 **403**。
-    2.  根據主管的 `org_path` 查詢其下屬所有層級員工的出席紀錄。
+    1.  驗證 `as` 是否具備主管權限（`employees.job_level <> 'STAFF'`，含 `MANAGER_L1` / `MANAGER_L2`），若無則回傳 **403**。
+    2.  根據主管的 `org_path_ltree` 用 `<@` 子樹過濾，查詢其下屬所有層級員工的出席紀錄。
 *   **後端應傳輸格式 (Output)**
     ```json
     {
@@ -55,7 +55,6 @@
         {
           "employee_id": "B001",
           "name": "王小明",
-          "is_manager": false,
           "org_path": "TSMC.Fab12.MFG.P1",
           "work_date": "2026-05-14",
           "first_in": "2026-05-14T08:00:00Z",

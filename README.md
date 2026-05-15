@@ -121,7 +121,7 @@ Schema 與 seed data 由 [golang-migrate](https://github.com/golang-migrate/migr
 | Table | 用途 | 寫入者 | 讀取者 |
 |---|---|---|---|
 | `access_events` | append-only 稽核日誌（FR-12 immutable，按月 partition）| `event-processor` | `reporting-api` |
-| `employees` | 員工主檔（`org_path` 中文 + `org_path_ltree` GiST + `is_manager` flag）| `org-sync` / 運維 | `reporting-api` |
+| `employees` | 員工主檔（`org_path` 中文 + `org_path_ltree` GiST + `job_level` VARCHAR CHECK：`STAFF`/`MANAGER_L1`/`MANAGER_L2`）| `org-sync` / 運維 | `reporting-api` |
 | `alerts` | FR-11 異常警報 | `anomaly-detector` | `reporting-api` |
 | `mv_daily_attendance` (MV) | FR-7 趨勢報表預聚合 | `mv-refresher` REFRESH | `reporting-api` |
 

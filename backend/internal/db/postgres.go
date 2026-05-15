@@ -148,11 +148,12 @@ func (p *PostgresDB) QueryAuditTrail(ctx context.Context, badgeID, startDate, en
 
 // GetManagerScope returns the manager's org_path_ltree if caller is an active manager.
 // FR-9 pattern a step 1：空結果由 caller 翻成 403。
+// 任何 job_level != 'STAFF' 都視為主管（MANAGER_L1 / MANAGER_L2 / ...）。
 func (p *PostgresDB) GetManagerScope(ctx context.Context, badgeID string) (string, error) {
 	var scope string
 	err := p.db.QueryRowContext(ctx,
 		`SELECT org_path_ltree::text FROM employees
-		 WHERE badge_id = $1 AND is_manager = TRUE AND is_active = TRUE`,
+		 WHERE badge_id = $1 AND job_level <> 'STAFF' AND is_active = TRUE`,
 		badgeID,
 	).Scan(&scope)
 	if err == sql.ErrNoRows {

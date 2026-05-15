@@ -29,11 +29,18 @@ var (
 	startTime = time.Now()
 )
 
+// job_level 值集合與 DB CHECK constraint (migration 0102) 一致。
+const (
+	JobLevelStaff     = "STAFF"
+	JobLevelManagerL1 = "MANAGER_L1" // 一級主管（例：廠長）
+	JobLevelManagerL2 = "MANAGER_L2" // 二級主管（例：部主管）
+)
+
 type orgRecord struct {
-	badgeID   string
-	name      string
-	orgPath   string
-	isManager bool
+	badgeID  string
+	name     string
+	orgPath  string
+	jobLevel string
 }
 
 func main() {
@@ -108,16 +115,16 @@ func main() {
 // 真實環境改連 LDAP/AD 抓 OU。
 func mockLDAP() []orgRecord {
 	return []orgRecord{
-		{"B001", "王小明", "TSMC.Fab12.製造部", true},
-		{"B002", "李大華", "TSMC.Fab12.品保部", true},
-		{"B003", "張美玲", "TSMC.Fab15.研發部", true},
-		{"B004", "陳志偉", "TSMC.Fab15.設備部", true},
-		{"B005", "林雅婷", "TSMC.總部.人資部", true},
-		{"B011", "林員工", "TSMC.Fab12.製造部", false},
-		{"B012", "趙員工", "TSMC.Fab12.製造部", false},
-		{"B100", "黃廠長", "TSMC.Fab12", true},
+		{"B001", "王小明", "TSMC.Fab12.製造部", JobLevelManagerL2},
+		{"B002", "李大華", "TSMC.Fab12.品保部", JobLevelManagerL2},
+		{"B003", "張美玲", "TSMC.Fab15.研發部", JobLevelManagerL2},
+		{"B004", "陳志偉", "TSMC.Fab15.設備部", JobLevelManagerL2},
+		{"B005", "林雅婷", "TSMC.總部.人資部", JobLevelManagerL2},
+		{"B011", "林員工", "TSMC.Fab12.製造部", JobLevelStaff},
+		{"B012", "趙員工", "TSMC.Fab12.製造部", JobLevelStaff},
+		{"B100", "黃廠長", "TSMC.Fab12", JobLevelManagerL1},
 		// 模擬 LDAP 新增一個員工
-		{"B013", "鄭新進", "TSMC.Fab12.製造部", false},
+		{"B013", "鄭新進", "TSMC.Fab12.製造部", JobLevelStaff},
 	}
 }
 
@@ -132,17 +139,17 @@ func sync(ctx context.Context, db *sql.DB) {
 
 	// UPSERT 進 employees（trg_sync_org_path_ltree 會自動同步 ltree 欄位）
 	stmt := `
-		INSERT INTO employees (badge_id, name, org_path, is_manager, is_active, updated_at)
+		INSERT INTO employees (badge_id, name, org_path, job_level, is_active, updated_at)
 		VALUES ($1, $2, $3, $4, TRUE, NOW())
 		ON CONFLICT (badge_id) DO UPDATE
 		SET name       = EXCLUDED.name,
 		    org_path   = EXCLUDED.org_path,
-		    is_manager = EXCLUDED.is_manager,
+		    job_level  = EXCLUDED.job_level,
 		    is_active  = TRUE,
 		    updated_at = NOW()
 	`
 	for _, r := range records {
-		if _, err := tx.ExecContext(ctx, stmt, r.badgeID, r.name, r.orgPath, r.isManager); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt, r.badgeID, r.name, r.orgPath, r.jobLevel); err != nil {
 			fmt.Printf("[SYNC-ERR] upsert %s: %v\n", r.badgeID, err)
 			return
 		}

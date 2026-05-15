@@ -19,7 +19,7 @@ erDiagram
         varchar(255) org_path        "中文 dot-separated path（給 UI 顯示）"
         ltree        org_path_ltree  "Phase 2: ltree + GiST，給 FR-6/9 子樹查詢"
         boolean      is_active       "default TRUE"
-        boolean      is_manager      "default FALSE; FR-6/9 scope"
+        varchar(20)  job_level       "CHECK: STAFF/MANAGER_L1/MANAGER_L2; default STAFF; FR-6/9"
         timestamptz  created_at      "default NOW()"
         timestamptz  updated_at      "default NOW()"
     }
@@ -91,7 +91,7 @@ erDiagram
 | `org_path` | `VARCHAR(255)` | ✓ | `'TSMC'` | - | 組織路徑（中文 dot-separated，如 `TSMC.Fab12.製造部`，給 UI 顯示） |
 | `org_path_ltree` | `LTREE` | ✓ | - | - | 與 `org_path` 內容同步的 ltree 表示，給 FR-6/9 子樹查詢（GiST index 加速）|
 | `is_active` | `BOOLEAN` | ✓ | `TRUE` | - | 是否在職 |
-| `is_manager` | `BOOLEAN` | ✓ | `FALSE` | - | 主管旗標；TRUE 表示其 `org_path_ltree` 為 manager scope（FR-6/9）|
+| `job_level` | `VARCHAR(20)` | ✓ | `'STAFF'` | `CHECK IN ('STAFF','MANAGER_L1','MANAGER_L2')` | 職等；`STAFF`=員工、`MANAGER_L1`=一級主管（例：廠長）、`MANAGER_L2`=二級主管（例：部主管）。非 `STAFF` 者其 `org_path_ltree` 即 manager scope（FR-6/9） |
 | `created_at` | `TIMESTAMPTZ` | ✓ | `NOW()` | - | 建立時間 |
 | `updated_at` | `TIMESTAMPTZ` | ✓ | `NOW()` | - | 更新時間 |
 
@@ -161,29 +161,38 @@ row trigger 之前 fire）。最終解法：
 如果加 FK，event-processor 會收到 FK violation 而把事件丟回 DLQ，
 反而違反 FR-12 append-only 的精神。
 
-### 3.4 `is_manager` flag — 主管識別
+### 3.4 `job_level` — 主管識別（多階層）
 
-`employees.is_manager BOOLEAN` 是 FR-6（階層團隊報表）與 FR-9（階層資料權限）
-在 DB 層的支援。一個 manager 的 scope **隱式**定義為：
+`employees.job_level VARCHAR(20)` 是 FR-6（階層團隊報表）與 FR-9（階層資料權限）
+在 DB 層的支援，取代早期 `is_manager BOOLEAN`（migration `0102`）。值集合：
 
-> manager 的 `org_path_ltree` + 任何以該 path 為後代的子路徑
+| 值 | 中文 | 例 |
+|---|---|---|
+| `STAFF` | 員工 | 一般員工 |
+| `MANAGER_L1` | 一級主管 | 廠長 |
+| `MANAGER_L2` | 二級主管 | 部主管 |
+
+**權限語意不變**：一個 manager 的 scope 仍**隱式**定義為其 `org_path_ltree`
++ 子樹（`<@` 運算子）。`job_level` 是「身分標籤」，**不**改變可見範圍。
+未來新增 `MANAGER_L3` 只需 `ALTER TABLE ... DROP CONSTRAINT + ADD CONSTRAINT`
+更新 CHECK，不動 backend 查詢邏輯。
 
 查詢樣板（pattern a，兩段式）：
 
 ```sql
 -- Step 1: 驗證 caller 是主管 + 取 scope（backend 對空結果回 403）
 SELECT org_path_ltree::text FROM employees
-WHERE badge_id = $1 AND is_manager = TRUE AND is_active = TRUE;
+WHERE badge_id = $1 AND job_level <> 'STAFF' AND is_active = TRUE;
 
 -- Step 2: 用 Step 1 的 path 過濾子樹（命中 GiST index）
 SELECT ... FROM mv_daily_attendance
 WHERE org_path_ltree <@ $2::ltree;
 ```
 
-### 3.5 為何 `is_manager` 不另建 index
+### 3.5 為何 `job_level` 不另建 index
 
-只有 2 種值，選擇性過低；所有 manager-scope 查詢都是
-`WHERE badge_id = $1 AND is_manager = TRUE`，已走 `employees_pkey`。
+只有 3 種值（之後即使擴充到 5~10 種），選擇性過低；所有 manager-scope 查詢都是
+`WHERE badge_id = $1 AND job_level <> 'STAFF'`，已走 `employees_pkey`。
 Index 反而增加寫入成本卻無 read 收益。
 
 ### 3.6 組織樹編碼：Phase 2 升級為 ltree + GiST
@@ -275,12 +284,15 @@ baseline migration `0001` 與 Phase 2 migrations `0003`/`0004`/`0005`/`0006` 中
 
 ```
 0001_init_schema         ── baseline：tables、indexes、triggers、REVOKE、pacs_reporter role、5 員工 seed
-0002_add_manager_flag    ── FR-6/9 schema gap：is_manager flag + 1 廠長 + 2 部員 seed
+0002_add_manager_flag    ── FR-6/9 schema gap：is_manager flag + 1 廠長 + 2 部員 seed（後被 0102 取代）
 0003_ltree_org_path      ── Phase 2：ltree extension + org_path_ltree + GiST + 同步 trigger
 0004_alerts_table        ── Phase 2：FR-11 alerts 表
 0005_partition_access_events ── Phase 2：access_events 按月 partition（36 個月）+ event_date 改普通欄位
 0006_mv_daily_attendance ── Phase 2：mv_daily_attendance + unique/GiST 索引
 0099_dev_seed            ── 45+ 筆 demo events（reason='[DEV_SEED]'）+ REFRESH MV
+0100_protect_access_event_partitions ── 把 FR-12 trigger 重掛到每個 partition child
+0101_access_event_partition_safety   ── partition 安全網（default partition + helper functions）
+0102_replace_is_manager_with_job_level ── 以 VARCHAR + CHECK 的多階 job_level 取代二元 is_manager
 ```
 
 每支 migration 都有對應 `.down.sql`（0099 因 FR-12 immutability 不允許 DELETE 而為 no-op；要重置 demo 資料請用 `docker compose down -v`）。
