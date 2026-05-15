@@ -88,6 +88,7 @@ func sampleAttendance() []models.AttendanceReport {
 		{
 			EmployeeID: "B001",
 			Name:       "王小明",
+			Status:     "employee",
 			OrgPath:    "TSMC.Fab12.製造部",
 			WorkDate:   "2026-05-01",
 			FirstIn:    &firstIn,

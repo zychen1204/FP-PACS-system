@@ -83,7 +83,12 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, date string) ([]models
 			e.event_date::text                            AS work_date,
 			MIN(CASE WHEN e.direction = 'IN'  THEN e.event_time END) AS first_in,
 			MAX(CASE WHEN e.direction = 'OUT' THEN e.event_time END) AS last_out,
-			COUNT(*)                                      AS swipe_count
+			COUNT(*)                                      AS swipe_count,
+			CASE COALESCE(emp.job_level, 'STAFF')
+			    WHEN 'MANAGER_L1' THEN 'mgr-1'
+			    WHEN 'MANAGER_L2' THEN 'mgr-2'
+			    ELSE 'employee'
+			END AS status
 		FROM access_events e
 		LEFT JOIN employees emp ON e.badge_id = emp.badge_id
 		WHERE e.status = 'SUCCESS'
@@ -96,7 +101,7 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, date string) ([]models
 	}
 
 	query += `
-		GROUP BY e.badge_id, emp.name, emp.org_path, e.event_date
+		GROUP BY e.badge_id, emp.name, emp.org_path, emp.job_level, e.event_date
 		ORDER BY e.event_date DESC, e.badge_id
 	`
 
@@ -109,7 +114,7 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, date string) ([]models
 	var reports []models.AttendanceReport
 	for rows.Next() {
 		var r models.AttendanceReport
-		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount); err != nil {
+		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.Status); err != nil {
 			return nil, err
 		}
 		if r.FirstIn != nil && r.LastOut != nil {
@@ -171,7 +176,11 @@ func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree,
 		       mv.event_date::text AS work_date,
 		       mv.first_in, mv.last_out, mv.swipe_count,
 		       COALESCE(mv.stay_hours, 0)::float8 AS stay_hours,
-		       COALESCE(emp.is_manager, false) AS is_manager
+		       CASE COALESCE(emp.job_level, 'STAFF')
+		           WHEN 'MANAGER_L1' THEN 'mgr-1'
+		           WHEN 'MANAGER_L2' THEN 'mgr-2'
+		           ELSE 'employee'
+		       END AS status
 		FROM mv_daily_attendance mv
 		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
 		WHERE mv.org_path_ltree <@ $1::ltree
@@ -192,7 +201,7 @@ func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree,
 	var reports []models.AttendanceReport
 	for rows.Next() {
 		var r models.AttendanceReport
-		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.StayHours, &r.IsManager); err != nil {
+		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.StayHours, &r.Status); err != nil {
 			return nil, err
 		}
 		reports = append(reports, r)

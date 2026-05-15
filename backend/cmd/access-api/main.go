@@ -110,11 +110,19 @@ func handleSwipe(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	tier := gateTier(req.GateID)
+	siteKey := req.SiteID
+	if siteKey == "" {
+		siteKey = "global"
+	}
+	t1Scope := siteKey + ":1" // e.g. "FAB12-A:1"
+	t2Scope := siteKey + ":2"
+	apbScope := siteKey + ":" + tier
 
-	// Tier hierarchy check (FR tier logic): entering a Tier-2 gate requires
-	// the badge to already be inside Tier-1 (last Tier-1 swipe was IN).
-	if tier == "2" && req.Direction == "IN" {
-		state, err := redisCache.GetState(ctx, "1", req.BadgeID)
+	// Strict tier hierarchy (no cascade):
+	// IN:  Tier-2 requires Tier-1 already IN (same site).
+	// OUT: Tier-1 requires Tier-2 already OUT or never entered (same site).
+	if req.Direction == "IN" && tier == "2" {
+		state, err := redisCache.GetState(ctx, t1Scope, req.BadgeID)
 		if err != nil {
 			fmt.Printf("[WARN] Redis unavailable (tier check), fail-closed: %v\n", err)
 			c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
@@ -126,23 +134,48 @@ func handleSwipe(c *gin.Context) {
 		}
 		if state != "IN" {
 			atomic.AddInt64(&swipeFail, 1)
-			event := models.AccessEvent{
-				BadgeID:   req.BadgeID,
-				SiteID:    req.SiteID,
-				GateID:    req.GateID,
-				Direction: req.Direction,
-				Status:    "REJECTED_APB",
-				Reason:    "未進入外層閘門",
-				Timestamp: time.Now().UTC(),
-			}
-			if !publishSwipeEvent(c, event) {
+			if !publishSwipeEvent(c, models.AccessEvent{
+				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
+				Direction: req.Direction, Status: "REJECTED_APB",
+				Reason: "未進入外層閘門", Timestamp: time.Now().UTC(),
+			}) {
 				return
 			}
-			fmt.Printf("[REJECTED] Tier violation: %s at %s (tier-1 state=%q)\n", req.BadgeID, req.GateID, state)
+			fmt.Printf("[REJECTED] Tier-2 IN without Tier-1: %s at %s\n", req.BadgeID, req.GateID)
 			c.JSON(http.StatusForbidden, models.SwipeResponse{
 				Status:    "REJECTED_APB",
 				Reason:    "未進入外層閘門",
-				Message:   "Tier hierarchy violation",
+				Message:   "Must enter outer gate first",
+				ErrorCode: "ERR_TIER_VIOLATION",
+			})
+			return
+		}
+	}
+	if req.Direction == "OUT" && tier == "1" {
+		state, err := redisCache.GetState(ctx, t2Scope, req.BadgeID)
+		if err != nil {
+			fmt.Printf("[WARN] Redis unavailable (tier check), fail-closed: %v\n", err)
+			c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
+				Status:    "ERROR",
+				Message:   "Access control unavailable, please retry",
+				ErrorCode: "ERR_SYSTEM_UNAVAILABLE",
+			})
+			return
+		}
+		if state == "IN" {
+			atomic.AddInt64(&swipeFail, 1)
+			if !publishSwipeEvent(c, models.AccessEvent{
+				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
+				Direction: req.Direction, Status: "REJECTED_APB",
+				Reason: "請先刷出內層閘門", Timestamp: time.Now().UTC(),
+			}) {
+				return
+			}
+			fmt.Printf("[REJECTED] Tier-1 OUT while Tier-2 still IN: %s at %s\n", req.BadgeID, req.GateID)
+			c.JSON(http.StatusForbidden, models.SwipeResponse{
+				Status:    "REJECTED_APB",
+				Reason:    "請先刷出內層閘門",
+				Message:   "Must exit inner gate first",
 				ErrorCode: "ERR_TIER_VIOLATION",
 			})
 			return
@@ -151,7 +184,7 @@ func handleSwipe(c *gin.Context) {
 
 	// Check anti-passback via Redis cache (FR-2).
 	// Fail-closed per design doc §5.2: Redis unavailable → 503, never bypass APB.
-	allowed, err := redisCache.CheckAntiPassback(ctx, tier, req.BadgeID, req.Direction)
+	allowed, err := redisCache.CheckAntiPassback(ctx, apbScope, req.BadgeID, req.Direction)
 	if err != nil {
 		fmt.Printf("[WARN] Redis unavailable, fail-closed: %v\n", err)
 		c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
@@ -191,24 +224,12 @@ func handleSwipe(c *gin.Context) {
 
 	event.Status = "SUCCESS"
 
-	if !commitSuccessfulSwipe(c, event) {
+	if !commitSuccessfulSwipe(c, apbScope, event) {
 		return
 	}
 	atomic.AddInt64(&swipeOK, 1)
 
-	// Cascade: swiping OUT at tier-1 implicitly marks tier-2 as OUT.
-	// Without this, a badge that exits tier-1 without swiping out of tier-2
-	// (e.g. tailgating through tier-2 exit) would be blocked from re-entering
-	// tier-2 the next day due to APB state still showing "IN".
-	if tier == "1" && req.Direction == "OUT" {
-		cascadeCtx, cascadeCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-		defer cascadeCancel()
-		if err := redisCache.SetDirection(cascadeCtx, "2", req.BadgeID, "OUT"); err != nil {
-			fmt.Printf("[WARN] Failed to cascade tier-2 OUT for %s: %v\n", req.BadgeID, err)
-		}
-	}
-
-	fmt.Printf("[SUCCESS] %s %s at %s\n", req.BadgeID, req.Direction, req.GateID)
+	fmt.Printf("[SUCCESS] %s %s at %s/%s\n", req.BadgeID, req.Direction, siteKey, req.GateID)
 	c.JSON(http.StatusOK, models.SwipeResponse{
 		Status:  "SUCCESS",
 		Message: "Access granted",
@@ -231,11 +252,11 @@ func publishSwipeEvent(c *gin.Context, event models.AccessEvent) bool {
 	return true
 }
 
-func commitSuccessfulSwipe(c *gin.Context, event models.AccessEvent) bool {
+func commitSuccessfulSwipe(c *gin.Context, scope string, event models.AccessEvent) bool {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
-	if err := redisCache.SetDirectionAndPublishEvent(ctx, gateTier(event.GateID), event.BadgeID, event.Direction, queue.StreamName, event); err != nil {
+	if err := redisCache.SetDirectionAndPublishEvent(ctx, scope, event.BadgeID, event.Direction, queue.StreamName, event); err != nil {
 		fmt.Printf("[WARN] Failed to commit APB state and event, fail-closed: %v\n", err)
 		c.JSON(http.StatusServiceUnavailable, models.SwipeResponse{
 			Status:    "ERROR",
