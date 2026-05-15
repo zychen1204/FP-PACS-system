@@ -1,4 +1,4 @@
-# PACS 前端升級 v2.0 — 後端整合規格 (極簡版)
+# PACS 前端升級 v2.1 — 後端整合規格 
 
 本文件定義前端與後端通訊的標準格式與處理邏輯。
 
@@ -60,7 +60,7 @@
     *   `as`: 主管 Badge ID (例: `B100`)
     *   `date`: 查詢日期 (例: `2026-05-14`)
 *   **後端應該做什麼 (Logic)**
-    1.  驗證 `as` 是否具備主管權限 (`status` 為 `mgr-1` 或 `mgr-2`)，若無則回傳 **403**。
+    1.  驗證 `as` 是否具備主管權限 (`status` 為 `mgr-1`、`mgr-2` 或 `mgr-3`)，若無則回傳 **403**。
     2.  根據主管的 `org_path` 查詢其下屬所有層級員工的出席紀錄。
 *   **後端應傳輸格式 (Output)**
     ```json
@@ -70,7 +70,7 @@
         {
           "employee_id": "B001",
           "name": "王小明",
-          "status": "employee",    // mgr-1, mgr-2, employee
+          "status": "employee",    // mgr-1, mgr-2, mgr-3, employee
           "org_path": "TSMC.Fab12.MFG.P1",
           "work_date": "2026-05-14",
           "first_in": "2026-05-14T08:00:00Z",

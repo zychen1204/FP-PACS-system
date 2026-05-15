@@ -30,6 +30,7 @@ function getRoleBadge(report) {
     const roles = {
         'mgr-1': { label: '🎖️ 一級主管', class: 'mgr-1' },
         'mgr-2': { label: '👔 二級主管', class: 'mgr-2' },
+        'mgr-3': { label: '📈 三級主管', class: 'mgr-3' },
         'employee': { label: '👤 員工', class: 'employee' }
     };
     const role = roles[status] || roles['employee'];
