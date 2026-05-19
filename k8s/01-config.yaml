@@ -1,24 +1,25 @@
+# ── ConfigMap ────────────────────────────────────────────────────────────────
+# 本地 k8s 測試用預設值。
+# GKE 部署時由 deploy-to-gke.sh 動態覆寫（注入 Memorystore IP、Cloud SQL 連線名）。
+# DB_HOST 固定為 127.0.0.1 因為 Cloud SQL Proxy 以 sidecar 形式跑在同一 Pod。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: pacs-config
   namespace: pacs
 data:
-  DB_HOST: "cloudsql-proxy"  # Cloud SQL Proxy service
+  DB_HOST: "127.0.0.1"
   DB_PORT: "5432"
   DB_USER: "pacs_user"
   DB_NAME: "pacs_db"
-  REDIS_HOST: "redis"
+  REDIS_HOST: "redis"      # 本地 k8s 用；GKE 部署時被 Memorystore IP 覆寫
   REDIS_PORT: "6379"
   PORT: "8080"
   LOG_LEVEL: "info"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: pacs-secrets
-  namespace: pacs
-type: Opaque
-stringData:
-  DB_PASSWORD: "your-secure-password-here"  # Change this!
-  POSTGRES_PASSWORD: "your-secure-password-here"
+  CLOUD_SQL_INSTANCE: ""   # GKE 部署時由 deploy-to-gke.sh 填入
+# ── Secret ───────────────────────────────────────────────────────────────────
+# 密碼由 deploy-to-gke.sh 自動生成並注入，不在此檔案內硬編碼。
+# 本地開發若需手動建立：
+#   kubectl create secret generic pacs-secrets -n pacs \
+#     --from-literal=DB_PASSWORD=<your-password> \
+#     --from-literal=JWT_SECRET=<your-secret>
