@@ -30,10 +30,6 @@
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">出席報表</span>
             </a>
-            <a href="#" class="nav-item" data-tab="manager-tab">
-                <span class="nav-icon">👔</span>
-                <span class="nav-label">主管視野</span>
-            </a>
             <a href="#" class="nav-item" data-tab="trend-tab">
                 <span class="nav-icon">📈</span>
                 <span class="nav-label">趨勢分析</span>
@@ -178,11 +174,28 @@
             <section id="attendance-tab" class="tab-content">
                 <div class="card">
                     <div class="card-header">
-                        <h3>📊 出席報表</h3>
-                        <p>員工每日出席紀錄總覽</p>
+                        <h3>📊 出席報表（主管視野）</h3>
+                        <p>查看自己或底下組織的出席紀錄</p>
                     </div>
 
-                    <div class="filter-section">
+                    <div class="filter-section" style="flex-wrap: wrap;">
+                        <div class="form-group" style="flex-basis: 100%;">
+                            <label>查詢模式</label>
+                            <div class="mode-selector">
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="self" checked>
+                                    <span>👤 自己的出缺席</span>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="org">
+                                    <span>🏢 底下組織</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="attendance-employee-id">員工 ID</label>
+                            <input type="text" id="attendance-employee-id" placeholder="例: B001" required>
+                        </div>
                         <div class="form-group">
                             <label for="attendance-date">日期</label>
                             <input type="date" id="attendance-date">
@@ -196,6 +209,12 @@
                     </div>
 
                     <div id="attendance-response" class="response-box">
+                        <div id="attendance-scope-bar" class="manager-scope-display" style="display:none;">
+                            <div class="scope-info">
+                                <span>管理部門: </span>
+                                <strong id="attendance-scope">-</strong>
+                            </div>
+                        </div>
                         <div id="attendance-stats" class="stats-grid"></div>
                         <div class="table-wrapper">
                             <table class="table">
@@ -214,62 +233,7 @@
                                 </thead>
                                 <tbody id="attendance-tbody">
                                     <tr class="empty">
-                                        <td colspan="9">點擊「查詢」以載入資料</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 3. Manager Team Tab -->
-            <section id="manager-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>👔 主管視野報表</h3>
-                        <p>查看所屬部門及下屬部門的出席情況（需要管理員權限）</p>
-                    </div>
-
-                    <div class="filter-section">
-                        <div class="form-group">
-                            <label for="manager-badge">主管證件 ID </label>
-                            <input type="text" id="manager-badge" placeholder="例: B100" value="B100">
-                        </div>
-                        <div class="form-group">
-                            <label for="manager-date">日期</label>
-                            <input type="date" id="manager-date">
-                        </div>
-                        <button id="btn-fetch-manager" class="btn btn-primary">
-                            📥 查詢團隊
-                        </button>
-                    </div>
-
-                    <div id="manager-response" class="response-box">
-                        <div class="manager-scope-display">
-                            <div class="scope-info">
-                                <span id="manager-scope-label">管理部門: </span>
-                                <strong id="manager-scope">-</strong>
-                            </div>
-                        </div>
-                        <div class="table-wrapper">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>員工 ID</th>
-                                        <th>姓名</th>
-                                        <th>身分</th>
-                                        <th>部門</th>
-                                        <th>日期</th>
-                                        <th>進入時間</th>
-                                        <th>離開時間</th>
-                                        <th>刷卡次數</th>
-                                        <th>停留時數</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="manager-tbody">
-                                    <tr class="empty">
-                                        <td colspan="9">點擊「查詢團隊」以載入資料</td>
+                                        <td colspan="9">選擇查詢模式後點擊「查詢」</td>
                                     </tr>
                                 </tbody>
                             </table>

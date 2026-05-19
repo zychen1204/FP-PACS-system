@@ -76,9 +76,6 @@ function setupEventListeners() {
     document.getElementById('btn-fetch-attendance')?.addEventListener('click', fetchAttendance);
     document.getElementById('btn-export-attendance')?.addEventListener('click', exportAttendanceExcel);
 
-    // Manager Tab
-    document.getElementById('btn-fetch-manager')?.addEventListener('click', fetchManagerTeam);
-
     // Trend Tab
     document.getElementById('btn-fetch-trend')?.addEventListener('click', fetchTrend);
 
@@ -113,7 +110,6 @@ function switchTab(e) {
     const titles = {
         'swipe-tab': '刷卡模擬器',
         'attendance-tab': '出席報表',
-        'manager-tab': '主管視野報表',
         'trend-tab': '趨勢分析',
         'alerts-tab': '警報異常',
         'settings-tab': '系統設定'
@@ -397,41 +393,72 @@ function updateServerStatus(online) {
 // ============ ATTENDANCE REPORT ============
 async function fetchAttendance() {
     const date = document.getElementById('attendance-date')?.value;
-    
+    const employeeId = document.getElementById('attendance-employee-id')?.value?.trim();
+    const mode = document.querySelector('input[name="attendance-mode"]:checked')?.value || 'self';
+
+    if (!employeeId) {
+        displayAttendanceError('請輸入員工 ID');
+        return;
+    }
+
     try {
-        let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
-        if (date) {
-            url += `&date=${date}`;
+        if (mode === 'org') {
+            let url = `${getReportUrl()}/v1/reports/manager-team?as=${employeeId}`;
+            if (date) url += `&date=${date}`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (response.status === 403) {
+                throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
+            }
+            if (!response.ok) {
+                throw new Error(data.error || '查詢失敗');
+            }
+
+            displayAttendanceReport(data.reports || [], data.manager_scope);
+        } else {
+            let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
+            if (date) url += `&date=${date}`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || '查詢失敗');
+            }
+
+            const filtered = data.filter(r => r.employee_id === employeeId);
+            displayAttendanceReport(filtered, null);
         }
-        
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || '查詢失敗');
-        }
-        
-        displayAttendanceReport(data);
-        
     } catch (error) {
         displayAttendanceError(error.message);
     }
 }
 
-function displayAttendanceReport(reports) {
+function displayAttendanceReport(reports, scope) {
     const statsContainer = document.getElementById('attendance-stats');
     const tbody = document.getElementById('attendance-tbody');
-    
+    const scopeBar = document.getElementById('attendance-scope-bar');
+    const scopeEl = document.getElementById('attendance-scope');
+
+    if (scope) {
+        scopeBar.style.display = '';
+        scopeEl.textContent = scope;
+    } else {
+        scopeBar.style.display = 'none';
+    }
+
     if (!reports || reports.length === 0) {
         statsContainer.innerHTML = '<p class="placeholder">無資料</p>';
         tbody.innerHTML = '<tr class="empty"><td colspan="9">無結果</td></tr>';
         return;
     }
-    
+
     const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
     const totalSwipes = reports.reduce((sum, r) => sum + (r.swipe_count || 0), 0);
     const avgStayHours = (reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0) / reports.length).toFixed(1);
-    
+
     statsContainer.innerHTML = `
         <div class="stat-item">
             <div class="stat-item-value">${reports.length}</div>
@@ -450,7 +477,7 @@ function displayAttendanceReport(reports) {
             <div class="stat-item-label">平均停留</div>
         </div>
     `;
-    
+
     tbody.innerHTML = reports.map(report => {
         const identity = getRoleBadge(report);
         return `
@@ -471,25 +498,27 @@ function displayAttendanceReport(reports) {
 function displayAttendanceError(message) {
     const statsContainer = document.getElementById('attendance-stats');
     const tbody = document.getElementById('attendance-tbody');
-    
+    const scopeBar = document.getElementById('attendance-scope-bar');
+
+    if (scopeBar) scopeBar.style.display = 'none';
     statsContainer.innerHTML = `<div style="color: var(--danger);">❌ ${message}</div>`;
     tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
 }
 
 async function exportAttendanceExcel() {
     const date = document.getElementById('attendance-date')?.value;
-    
+
     try {
         let url = `${getReportUrl()}/v1/reports/attendance/export`;
         if (date) {
             url += `?date=${date}`;
         }
-        
+
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error('匯出失敗');
         }
-        
+
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -497,83 +526,10 @@ async function exportAttendanceExcel() {
         link.download = `attendance-${date || new Date().toISOString().split('T')[0]}.xlsx`;
         link.click();
         URL.revokeObjectURL(downloadUrl);
-        
+
     } catch (error) {
         alert('匯出失敗: ' + error.message);
     }
-}
-
-// ============ MANAGER TEAM ============
-async function fetchManagerTeam() {
-    const badge = document.getElementById('manager-badge')?.value?.trim();
-    const date = document.getElementById('manager-date')?.value;
-    
-    if (!badge) {
-        alert('請輸入主管證件 ID');
-        return;
-    }
-    
-    try {
-        let url = `${getReportUrl()}/v1/reports/manager-team?as=${badge}`;
-        if (date) {
-            url += `&date=${date}`;
-        }
-        
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        if (response.status === 403) {
-            throw new Error(`${badge} 無主管權限`);
-        }
-        if (!response.ok) {
-            throw new Error(data.error || '查詢失敗');
-        }
-        
-        displayManagerTeam(data);
-        
-    } catch (error) {
-        displayManagerError(error.message);
-    }
-}
-
-function displayManagerTeam(data) {
-    const scopeDisplay = document.getElementById('manager-scope');
-    const tbody = document.getElementById('manager-tbody');
-    
-    if (!scopeDisplay || !tbody) return;
-    
-    scopeDisplay.textContent = data.manager_scope || '-';
-    
-    const reports = data.reports || [];
-    if (reports.length === 0) {
-        tbody.innerHTML = '<tr class="empty"><td colspan="9">無下屬出席紀錄</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = reports.map(report => {
-        const identity = getRoleBadge(report);
-        return `
-        <tr>
-            <td>${report.employee_id}</td>
-            <td>${report.name || '-'}</td>
-            <td>${identity}</td>
-            <td>${report.org_path || '-'}</td>
-            <td>${report.work_date || '-'}</td>
-            <td>${formatTime(report.first_in)}</td>
-            <td>${formatTime(report.last_out)}</td>
-            <td><strong>${report.swipe_count}</strong></td>
-            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
-        </tr>
-    `;
-    }).join('');
-}
-
-function displayManagerError(message) {
-    const scopeDisplay = document.getElementById('manager-scope');
-    const tbody = document.getElementById('manager-tbody');
-    
-    if (scopeDisplay) scopeDisplay.textContent = '查詢失敗';
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="color: var(--danger); text-align: center;">❌ ${message}</td></tr>`;
 }
 
 // ============ TREND ANALYSIS ============

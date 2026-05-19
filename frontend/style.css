@@ -882,6 +882,49 @@ body {
 }
 
 /* ============================================
+   Mode Selector (Attendance Tab)
+   ============================================ */
+
+.mode-selector {
+    display: flex;
+    gap: 12px;
+}
+
+.mode-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: var(--transition);
+    background: rgba(0, 0, 0, 0.2);
+    user-select: none;
+}
+
+.mode-option:hover {
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+.mode-option input[type="radio"] {
+    accent-color: var(--primary-light);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.mode-option:has(input:checked) {
+    border-color: var(--primary-light);
+    background: rgba(30, 64, 175, 0.15);
+    color: var(--text-primary);
+}
+
+/* ============================================
    Manager Section
    ============================================ */
 
