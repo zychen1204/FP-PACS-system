@@ -6,21 +6,12 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: gce
     kubernetes.io/ingress.allow-http: "true"
-    # GKE 特定設定：靜態 IP (需要先建立)
-    # kubernetes.io/kubernetes.io/static-ip-name: "pacs-ip"
+    # 不設定 static-ip-name → GKE 自動分配動態 IP
 spec:
   rules:
   - http:
       paths:
-      # Frontend (Default)
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: frontend
-            port:
-              number: 80
-      # Access API
+      # Access API (write path)
       - path: /v1/swipe
         pathType: Prefix
         backend:
@@ -28,7 +19,7 @@ spec:
             name: access-api
             port:
               number: 8080
-      # Reporting API
+      # Reporting API (all read endpoints)
       - path: /v1/reports
         pathType: Prefix
         backend:
@@ -36,3 +27,32 @@ spec:
             name: reporting-api
             port:
               number: 8081
+      - path: /v1/audit
+        pathType: Prefix
+        backend:
+          service:
+            name: reporting-api
+            port:
+              number: 8081
+      - path: /v1/alerts
+        pathType: Prefix
+        backend:
+          service:
+            name: reporting-api
+            port:
+              number: 8081
+      - path: /v1/dev
+        pathType: Prefix
+        backend:
+          service:
+            name: reporting-api
+            port:
+              number: 8081
+      # Frontend (catch-all, must be last)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
