@@ -15,6 +15,10 @@ const state = {
     // Data
     swipeHistory: JSON.parse(localStorage.getItem('swipeHistory')) || [],
     trendChart: null,
+    modalChart: null,
+    modalTrendData: null,
+    modalBadge: null,
+    modalScope: null,
     
     // UI State
     selectedTier: 'outer',
@@ -75,9 +79,21 @@ function setupEventListeners() {
     // Attendance Tab
     document.getElementById('btn-fetch-attendance')?.addEventListener('click', fetchAttendance);
     document.getElementById('btn-export-attendance')?.addEventListener('click', exportAttendanceExcel);
+    document.getElementById('btn-org-trend')?.addEventListener('click', showOrgTrend);
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', selectPeriod);
+    });
 
-    // Trend Tab
-    document.getElementById('btn-fetch-trend')?.addEventListener('click', fetchTrend);
+    // Trend Modal
+    document.getElementById('btn-close-trend-modal')?.addEventListener('click', closeTrendModal);
+    document.getElementById('trend-modal')?.addEventListener('click', e => {
+        if (e.target.id === 'trend-modal') closeTrendModal();
+    });
+    document.getElementById('trend-modal-metric')?.addEventListener('change', () => {
+        if (state.modalTrendData) renderModalChart(state.modalTrendData);
+    });
+
+    initQuarterYearSelect();
 
     // Alerts Tab
     document.getElementById('btn-fetch-alerts')?.addEventListener('click', fetchAlerts);
@@ -110,7 +126,6 @@ function switchTab(e) {
     const titles = {
         'swipe-tab': '刷卡模擬器',
         'attendance-tab': '出席報表',
-        'trend-tab': '趨勢分析',
         'alerts-tab': '警報異常',
         'settings-tab': '系統設定'
     };
@@ -390,11 +405,65 @@ function updateServerStatus(online) {
     statusText.textContent = online ? '線上' : '離線';
 }
 
+// ============ PERIOD SELECTOR ============
+function initQuarterYearSelect() {
+    const sel = document.getElementById('attendance-quarter-year');
+    if (!sel) return;
+    const thisYear = new Date().getFullYear();
+    for (let y = thisYear; y >= thisYear - 5; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + ' 年';
+        sel.appendChild(opt);
+    }
+}
+
+function selectPeriod(e) {
+    const btn = e.target.closest('.period-btn');
+    if (!btn) return;
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const period = btn.dataset.period;
+    document.getElementById('picker-day').style.display = period === 'day' ? '' : 'none';
+    document.getElementById('picker-month').style.display = period === 'month' ? '' : 'none';
+    document.getElementById('picker-quarter').style.display = period === 'quarter' ? '' : 'none';
+}
+
+function getPeriodDateRange() {
+    const period = document.querySelector('.period-btn.active')?.dataset.period || 'day';
+    let startDate = null, endDate = null;
+
+    if (period === 'day') {
+        const d = document.getElementById('attendance-date-day')?.value;
+        startDate = d || null;
+        endDate = d || null;
+    } else if (period === 'month') {
+        const m = document.getElementById('attendance-date-month')?.value;
+        if (m) {
+            const [y, mo] = m.split('-').map(Number);
+            const last = new Date(y, mo, 0).getDate();
+            startDate = `${m}-01`;
+            endDate = `${m}-${String(last).padStart(2, '0')}`;
+        }
+    } else if (period === 'quarter') {
+        const y = document.getElementById('attendance-quarter-year')?.value;
+        const q = parseInt(document.getElementById('attendance-quarter-q')?.value || '1');
+        if (y) {
+            const sm = (q - 1) * 3 + 1;
+            const em = q * 3;
+            const last = new Date(parseInt(y), em, 0).getDate();
+            startDate = `${y}-${String(sm).padStart(2, '0')}-01`;
+            endDate = `${y}-${String(em).padStart(2, '0')}-${last}`;
+        }
+    }
+    return { period, startDate, endDate };
+}
+
 // ============ ATTENDANCE REPORT ============
 async function fetchAttendance() {
-    const date = document.getElementById('attendance-date')?.value;
     const employeeId = document.getElementById('attendance-employee-id')?.value?.trim();
     const mode = document.querySelector('input[name="attendance-mode"]:checked')?.value || 'self';
+    const { period, startDate, endDate } = getPeriodDateRange();
 
     if (!employeeId) {
         displayAttendanceError('請輸入員工 ID');
@@ -404,50 +473,47 @@ async function fetchAttendance() {
     try {
         if (mode === 'org') {
             let url = `${getReportUrl()}/v1/reports/manager-team?as=${employeeId}`;
-            if (date) url += `&date=${date}`;
+            if (startDate) url += `&date=${startDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
 
-            if (response.status === 403) {
-                throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
-            }
-            if (!response.ok) {
-                throw new Error(data.error || '查詢失敗');
-            }
+            if (response.status === 403) throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
+            if (!response.ok) throw new Error(data.error || '查詢失敗');
 
-            displayAttendanceReport(data.reports || [], data.manager_scope);
+            state.currentOrgScope = data.manager_scope;
+            displayAttendanceReport(data.reports || [], data.manager_scope, mode);
         } else {
             let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
-            if (date) url += `&date=${date}`;
+            if (startDate) url += `&date=${startDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
 
-            if (!response.ok) {
-                throw new Error(data.error || '查詢失敗');
-            }
+            if (!response.ok) throw new Error(data.error || '查詢失敗');
 
-            const filtered = data.filter(r => r.employee_id === employeeId);
-            displayAttendanceReport(filtered, null);
+            let filtered = data.filter(r => r.employee_id === employeeId);
+            if (period !== 'day' && startDate && endDate) {
+                filtered = filtered.filter(r => r.work_date >= startDate && r.work_date <= endDate);
+            }
+            state.currentOrgScope = null;
+            displayAttendanceReport(filtered, null, mode);
         }
     } catch (error) {
         displayAttendanceError(error.message);
     }
 }
 
-function displayAttendanceReport(reports, scope) {
+function displayAttendanceReport(reports, scope, mode) {
     const statsContainer = document.getElementById('attendance-stats');
     const tbody = document.getElementById('attendance-tbody');
     const scopeBar = document.getElementById('attendance-scope-bar');
     const scopeEl = document.getElementById('attendance-scope');
+    const orgTrendBtn = document.getElementById('btn-org-trend');
 
-    if (scope) {
-        scopeBar.style.display = '';
-        scopeEl.textContent = scope;
-    } else {
-        scopeBar.style.display = 'none';
-    }
+    scopeBar.style.display = scope ? '' : 'none';
+    if (scope) scopeEl.textContent = scope;
+    if (orgTrendBtn) orgTrendBtn.style.display = (mode === 'org' && scope) ? '' : 'none';
 
     if (!reports || reports.length === 0) {
         statsContainer.innerHTML = '<p class="placeholder">無資料</p>';
@@ -460,28 +526,16 @@ function displayAttendanceReport(reports, scope) {
     const avgStayHours = (reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0) / reports.length).toFixed(1);
 
     statsContainer.innerHTML = `
-        <div class="stat-item">
-            <div class="stat-item-value">${reports.length}</div>
-            <div class="stat-item-label">總紀錄</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-item-value">${uniqueEmployees}</div>
-            <div class="stat-item-label">員工數</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-item-value">${totalSwipes}</div>
-            <div class="stat-item-label">刷卡次</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-item-value">${avgStayHours}</div>
-            <div class="stat-item-label">平均停留</div>
-        </div>
+        <div class="stat-item"><div class="stat-item-value">${reports.length}</div><div class="stat-item-label">總紀錄</div></div>
+        <div class="stat-item"><div class="stat-item-value">${uniqueEmployees}</div><div class="stat-item-label">員工數</div></div>
+        <div class="stat-item"><div class="stat-item-value">${totalSwipes}</div><div class="stat-item-label">刷卡次</div></div>
+        <div class="stat-item"><div class="stat-item-value">${avgStayHours}</div><div class="stat-item-label">平均停留</div></div>
     `;
 
     tbody.innerHTML = reports.map(report => {
         const identity = getRoleBadge(report);
         return `
-        <tr>
+        <tr class="clickable-row" data-id="${report.employee_id}" data-name="${report.name || report.employee_id}" style="cursor:pointer;" title="點擊查看趨勢分析">
             <td>${report.employee_id}</td>
             <td>${report.name || '-'}</td>
             <td>${identity}</td>
@@ -493,167 +547,158 @@ function displayAttendanceReport(reports, scope) {
             <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
         </tr>`;
     }).join('');
+
+    document.querySelectorAll('#attendance-tbody .clickable-row').forEach(row => {
+        row.addEventListener('click', () => {
+            showEmployeeTrend(row.dataset.id, row.dataset.name);
+        });
+        row.addEventListener('mouseenter', () => row.style.background = 'rgba(30,64,175,0.15)');
+        row.addEventListener('mouseleave', () => row.style.background = '');
+    });
 }
 
 function displayAttendanceError(message) {
     const statsContainer = document.getElementById('attendance-stats');
     const tbody = document.getElementById('attendance-tbody');
     const scopeBar = document.getElementById('attendance-scope-bar');
+    const orgTrendBtn = document.getElementById('btn-org-trend');
 
     if (scopeBar) scopeBar.style.display = 'none';
+    if (orgTrendBtn) orgTrendBtn.style.display = 'none';
     statsContainer.innerHTML = `<div style="color: var(--danger);">❌ ${message}</div>`;
     tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
 }
 
 async function exportAttendanceExcel() {
-    const date = document.getElementById('attendance-date')?.value;
-
+    const { startDate } = getPeriodDateRange();
     try {
         let url = `${getReportUrl()}/v1/reports/attendance/export`;
-        if (date) {
-            url += `?date=${date}`;
-        }
+        if (startDate) url += `?date=${startDate}`;
 
         const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error('匯出失敗');
-        }
+        if (!response.ok) throw new Error('匯出失敗');
 
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = `attendance-${date || new Date().toISOString().split('T')[0]}.xlsx`;
+        link.download = `attendance-${startDate || new Date().toISOString().split('T')[0]}.xlsx`;
         link.click();
         URL.revokeObjectURL(downloadUrl);
-
     } catch (error) {
         alert('匯出失敗: ' + error.message);
     }
 }
 
-// ============ TREND ANALYSIS ============
-async function fetchTrend() {
-    const startDate = document.getElementById('trend-start')?.value;
-    const endDate = document.getElementById('trend-end')?.value;
-    const asBadge = document.getElementById('trend-as')?.value?.trim();
-    
-    if (!startDate || !endDate) {
-        alert('請選擇開始和結束日期');
-        return;
-    }
-    
-    const period = document.getElementById('trend-period')?.value || 'day';
-    
+// ============ TREND MODAL ============
+function showEmployeeTrend(employeeId, name) {
+    document.getElementById('trend-modal-title').textContent = `📈 ${name}（${employeeId}）趨勢分析`;
+    const scopeBar = document.getElementById('trend-modal-scope');
+    if (scopeBar) scopeBar.style.display = 'none';
+    state.modalBadge = employeeId;
+    state.modalScope = null;
+    openTrendModal();
+}
+
+function showOrgTrend() {
+    const scope = state.currentOrgScope;
+    if (!scope) return;
+    document.getElementById('trend-modal-title').textContent = `📈 底下組織趨勢分析`;
+    const scopeBar = document.getElementById('trend-modal-scope');
+    const scopeText = document.getElementById('trend-modal-scope-text');
+    if (scopeBar) scopeBar.style.display = '';
+    if (scopeText) scopeText.textContent = scope;
+    state.modalBadge = null;
+    state.modalScope = scope;
+    openTrendModal();
+}
+
+async function openTrendModal() {
+    const modal = document.getElementById('trend-modal');
+    modal.style.display = 'flex';
+    document.getElementById('trend-modal-loading').style.display = 'block';
+    document.getElementById('trend-modal-chart-wrap').style.display = 'none';
+
+    const { period, startDate, endDate } = getPeriodDateRange();
+    const apiPeriod = period === 'day' ? 'day' : period === 'month' ? 'month' : 'quarter';
+
+    let url = `${getReportUrl()}/v1/reports/trend?period=${apiPeriod}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    if (state.modalBadge) url += `&as=${state.modalBadge}`;
+
     try {
-        let url = `${getReportUrl()}/v1/reports/trend?start_date=${startDate}&end_date=${endDate}&period=${period}`;
-        if (asBadge) {
-            url += `&as=${asBadge}`;
-        }
-        
         const response = await fetch(url);
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || '查詢失敗');
-        }
-        
-        displayTrendChart(data);
-        
-    } catch (error) {
-        alert('趨勢查詢失敗: ' + error.message);
+        if (!response.ok) throw new Error(data.error || '查詢失敗');
+
+        state.modalTrendData = (data.trends || []).reverse();
+        document.getElementById('trend-modal-loading').style.display = 'none';
+        document.getElementById('trend-modal-chart-wrap').style.display = 'block';
+        renderModalChart(state.modalTrendData);
+    } catch (err) {
+        document.getElementById('trend-modal-loading').textContent = `❌ ${err.message}`;
     }
 }
 
-function displayTrendChart(data) {
-    const scopeDisplay = document.getElementById('trend-scope-display');
-    if (scopeDisplay) {
-        scopeDisplay.textContent = data.scope || '全廠範圍 (Global)';
+function renderModalChart(trends) {
+    if (state.modalChart) {
+        state.modalChart.destroy();
+        state.modalChart = null;
     }
+    const ctx = document.getElementById('trend-modal-chart');
+    if (!ctx || !trends || trends.length === 0) return;
 
-    // 反轉趨勢資料，讓日期從左到右的排序反過來
-    const trends = (data.trends || []).reverse();
-    if (trends.length === 0) {
-        alert('無趨勢資料');
-        return;
-    }
-    
-    const selectedMetric = document.getElementById('trend-metric')?.value || 'avg_stay_hrs';
-    const labels = trends.map(t => t.bucket);
-    
-    let dataset = {};
-    if (selectedMetric === 'avg_stay_hrs') {
-        dataset = {
-            label: '平均停留時數 (hrs)',
-            data: trends.map(t => t.avg_stay_hrs),
-            borderColor: '#1e40af',
-            backgroundColor: 'rgba(30, 64, 175, 0.1)',
-            tension: 0.4,
-            fill: true
-        };
-    } else if (selectedMetric === 'head_count') {
-        dataset = {
-            label: '出勤人頭數 (persons)',
-            data: trends.map(t => t.head_count),
-            borderColor: '#059669',
-            backgroundColor: 'rgba(5, 150, 105, 0.1)',
-            tension: 0.4,
-            fill: true
-        };
-    } else if (selectedMetric === 'total_swipes') {
-        dataset = {
-            label: '總刷卡次數 (counts)',
-            data: trends.map(t => t.total_swipes),
-            borderColor: '#fbbf24',
-            backgroundColor: 'rgba(251, 191, 36, 0.1)',
-            tension: 0.4,
-            fill: true
-        };
-    }
-    
-    const metricUnits = {
-        'avg_stay_hrs': '時數 (hrs)',
-        'head_count': '人數 (persons)',
-        'total_swipes': '次數 (counts)'
+    const metric = document.getElementById('trend-modal-metric')?.value || 'avg_stay_hrs';
+    const metricConfig = {
+        avg_stay_hrs: { label: '平均停留時數 (hrs)', color: '#3b82f6', unit: '時數 (hrs)' },
+        head_count:   { label: '出勤人頭數 (persons)', color: '#10b981', unit: '人數 (persons)' },
+        total_swipes: { label: '總刷卡次數 (counts)', color: '#fbbf24', unit: '次數 (counts)' }
     };
-    const currentUnit = metricUnits[selectedMetric] || '';
-    const datasets = [dataset];
-    
-    if (state.trendChart) {
-        state.trendChart.destroy();
-    }
-    
-    const ctx = document.getElementById('trend-chart');
-    if (!ctx) return;
-    
-    state.trendChart = new Chart(ctx, {
+    const cfg = metricConfig[metric];
+
+    state.modalChart = new Chart(ctx, {
         type: 'line',
-        data: { labels, datasets },
+        data: {
+            labels: trends.map(t => t.bucket),
+            datasets: [{
+                label: cfg.label,
+                data: trends.map(t => t[metric]),
+                borderColor: cfg.color,
+                backgroundColor: cfg.color + '22',
+                tension: 0.4,
+                fill: true,
+                pointRadius: 4,
+                pointHoverRadius: 6
+            }]
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { labels: { color: '#f1f5f9' } }
-            },
+            plugins: { legend: { labels: { color: '#f1f5f9' } } },
             scales: {
                 y: {
                     beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: currentUnit,
-                        color: '#94a3b8',
-                        font: { size: 12 }
-                    },
+                    title: { display: true, text: cfg.unit, color: '#94a3b8', font: { size: 12 } },
                     ticks: { color: '#f1f5f9' },
-                    grid: { color: 'rgba(71, 85, 105, 0.2)' }
+                    grid: { color: 'rgba(71,85,105,0.2)' }
                 },
                 x: {
                     ticks: { color: '#f1f5f9' },
-                    grid: { color: 'rgba(71, 85, 105, 0.2)' }
+                    grid: { color: 'rgba(71,85,105,0.2)' }
                 }
             }
         }
     });
+}
+
+function closeTrendModal() {
+    document.getElementById('trend-modal').style.display = 'none';
+    if (state.modalChart) {
+        state.modalChart.destroy();
+        state.modalChart = null;
+    }
+    state.modalTrendData = null;
 }
 
 // ============ ALERTS ============
