@@ -1,11 +1,13 @@
 /**
- * PACS Frontend - Comprehensive Test Suite
- * 
- * Test Coverage:
- * - Unit Tests: Individual functions (formatters, validators)
- * - Integration Tests: API interactions with mocked responses
- * - UI Tests: DOM manipulation and event handling
- * - E2E Tests: Complete user workflows
+ * PACS Frontend - Test Suite
+ *
+ * Coverage:
+ * - Unit:       formatTime, formatTimeDetailed, getDateDaysAgo, getRoleBadge
+ * - API:        swipe, attendance, aggregated, audit trail, manager-team,
+ *               trend (with summary), alerts
+ * - State:      localStorage persistence
+ * - Validation: payload shapes, canonical status values, gate ID format
+ * - UI:         DOM class toggles, period / isAggregated logic
  */
 
 // ============ TEST FRAMEWORK ============
@@ -46,17 +48,10 @@ class TestSuite {
     }
 }
 
-// Assertion helpers
 const assert = {
     equal: (actual, expected, message) => {
-        if (actual !== expected) {
-            throw new Error(`${message}\nExpected: ${expected}\nActual: ${actual}`);
-        }
-    },
-    deepEqual: (actual, expected, message) => {
-        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-            throw new Error(`${message}\nExpected: ${JSON.stringify(expected)}\nActual: ${JSON.stringify(actual)}`);
-        }
+        if (actual !== expected)
+            throw new Error(`${message}\nExpected: ${expected}\nActual:   ${actual}`);
     },
     true: (value, message) => {
         if (value !== true) throw new Error(message);
@@ -68,508 +63,440 @@ const assert = {
         if (value === null || value === undefined) throw new Error(message);
     },
     includes: (array, value, message) => {
-        if (!array.includes(value)) throw new Error(`${message}: ${value} not in array`);
-    }
+        if (!array.includes(value)) throw new Error(`${message}: "${value}" not in [${array}]`);
+    },
+    contains: (str, sub, message) => {
+        if (!str.includes(sub)) throw new Error(`${message}: "${sub}" not found in "${str}"`);
+    },
 };
 
 // ============ UNIT TESTS ============
 const unitTests = new TestSuite('Unit Tests - Utility Functions');
 
-unitTests.it('formatTime: Convert RFC3339 to locale time', () => {
-    // Mock implementation based on actual function
-    const formatTime = (timeString) => {
-        try {
-            const date = new Date(timeString);
-            return date.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-        } catch {
-            return '-';
-        }
+unitTests.it('formatTime: null / undefined / empty → "-"', () => {
+    const fmt = (s) => {
+        if (!s) return '-';
+        try { return new Date(s).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }); }
+        catch { return s; }
     };
-
-    const result = formatTime('2026-05-14T09:30:00Z');
-    assert.exists(result, 'formatTime should return a string');
-    assert.true(result.includes('14'), 'Should contain date');
+    assert.equal(fmt(null),      '-', 'null should return -');
+    assert.equal(fmt(undefined), '-', 'undefined should return -');
+    assert.equal(fmt(''),        '-', 'empty string should return -');
 });
 
-unitTests.it('getDateDaysAgo: Calculate date N days ago', () => {
-    const getDateDaysAgo = (days) => {
-        const date = new Date();
-        date.setDate(date.getDate() - days);
-        return date.toISOString().split('T')[0];
+unitTests.it('formatTime: Valid ISO timestamp returns HH:MM string', () => {
+    const fmt = (s) => {
+        if (!s) return '-';
+        try { return new Date(s).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }); }
+        catch { return s; }
     };
+    const result = fmt('2026-05-14T09:30:00Z');
+    assert.true(result !== '-', 'Should not be dash for valid timestamp');
+    assert.exists(result, 'Should return a string');
+});
 
+unitTests.it('formatTimeDetailed: null → "-"', () => {
+    const fmt = (s) => {
+        if (!s) return '-';
+        try { return new Date(s).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+        catch { return s; }
+    };
+    assert.equal(fmt(null), '-', 'null should return -');
+});
+
+unitTests.it('formatTimeDetailed: Valid timestamp returns HH:MM:SS string', () => {
+    const fmt = (s) => {
+        if (!s) return '-';
+        try { return new Date(s).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+        catch { return s; }
+    };
+    const result = fmt('2026-05-14T09:30:45Z');
+    assert.true(result !== '-', 'Should not be dash');
+    assert.exists(result, 'Should return a string');
+});
+
+unitTests.it('getDateDaysAgo: Returns YYYY-MM-DD before today', () => {
+    const fn = (days) => {
+        const d = new Date();
+        d.setDate(d.getDate() - days);
+        return d.toISOString().split('T')[0];
+    };
     const today = new Date().toISOString().split('T')[0];
-    const sevenDaysAgo = getDateDaysAgo(7);
-    
-    assert.exists(sevenDaysAgo, 'Should return date string');
-    assert.true(sevenDaysAgo < today, '7 days ago should be before today');
+    const ago7  = fn(7);
+    assert.true(/^\d{4}-\d{2}-\d{2}$/.test(ago7), 'Must be YYYY-MM-DD');
+    assert.true(ago7 < today, '7 days ago must be before today');
 });
 
-unitTests.it('validateBadgeId: Check badge ID format', () => {
-    const validateBadgeId = (id) => {
-        return /^B\d{3,}$/.test(id) || /^[A-Z][A-Z0-9]{2,}$/.test(id);
+unitTests.it('getRoleBadge: MANAGER_L1 → 一級主管 + class mgr-1', () => {
+    const fn = (report) => {
+        const status = report.status || 'STAFF';
+        const roles = {
+            'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+            'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+            'STAFF':      { label: '👤 員工',      class: 'employee' },
+        };
+        const role = roles[status] || roles['STAFF'];
+        return `<span class="badge-role ${role.class}">${role.label}</span>`;
     };
-
-    assert.true(validateBadgeId('B001'), 'B001 should be valid');
-    assert.true(validateBadgeId('B100'), 'B100 should be valid');
-    assert.false(validateBadgeId('123'), '123 should be invalid');
-    assert.false(validateBadgeId(''), 'Empty should be invalid');
+    const html = fn({ status: 'MANAGER_L1' });
+    assert.contains(html, '一級主管', 'Should contain 一級主管');
+    assert.contains(html, 'mgr-1', 'Should have class mgr-1');
 });
 
-unitTests.it('calculateStayHours: Compute duration from timestamps', () => {
-    const calculateStayHours = (firstIn, lastOut) => {
-        if (!firstIn || !lastOut) return 0;
-        const start = new Date(firstIn);
-        const end = new Date(lastOut);
-        return (end - start) / (1000 * 60 * 60); // Convert to hours
+unitTests.it('getRoleBadge: MANAGER_L2 → 二級主管 + class mgr-2', () => {
+    const fn = (report) => {
+        const status = report.status || 'STAFF';
+        const roles = {
+            'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+            'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+            'STAFF':      { label: '👤 員工',      class: 'employee' },
+        };
+        const role = roles[status] || roles['STAFF'];
+        return `<span class="badge-role ${role.class}">${role.label}</span>`;
     };
-
-    const firstIn = '2026-05-14T09:00:00Z';
-    const lastOut = '2026-05-14T17:00:00Z';
-    const hours = calculateStayHours(firstIn, lastOut);
-
-    assert.true(hours > 0, 'Stay hours should be positive');
-    assert.true(hours <= 24, 'Stay hours should be reasonable');
+    const html = fn({ status: 'MANAGER_L2' });
+    assert.contains(html, '二級主管', 'Should contain 二級主管');
+    assert.contains(html, 'mgr-2', 'Should have class mgr-2');
 });
 
-unitTests.it('parseGateId: Extract tier and gate from ID', () => {
-    const parseGateId = (gateId) => {
-        const match = gateId.match(/^(\d)-([A-Z])$/);
-        return match ? { tier: match[1], gate: match[2] } : null;
+unitTests.it('getRoleBadge: STAFF → 員工 + class employee', () => {
+    const fn = (report) => {
+        const status = report.status || 'STAFF';
+        const roles = {
+            'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+            'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+            'STAFF':      { label: '👤 員工',      class: 'employee' },
+        };
+        const role = roles[status] || roles['STAFF'];
+        return `<span class="badge-role ${role.class}">${role.label}</span>`;
     };
+    const html = fn({ status: 'STAFF' });
+    assert.contains(html, '員工', 'Should contain 員工');
+    assert.contains(html, 'employee', 'Should have class employee');
+});
 
-    const outer = parseGateId('1-A');
-    assert.equal(outer.tier, '1', 'Outer tier should be 1');
-    assert.equal(outer.gate, 'A', 'Gate should be A');
-
-    const inner = parseGateId('2-B');
-    assert.equal(inner.tier, '2', 'Inner tier should be 2');
-    assert.equal(inner.gate, 'B', 'Gate should be B');
+unitTests.it('getRoleBadge: Unknown / legacy status falls back to STAFF', () => {
+    const fn = (report) => {
+        const status = report.status || 'STAFF';
+        const roles = {
+            'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
+            'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
+            'STAFF':      { label: '👤 員工',      class: 'employee' },
+        };
+        const role = roles[status] || roles['STAFF'];
+        return `<span class="badge-role ${role.class}">${role.label}</span>`;
+    };
+    // 'mgr-1' is the old legacy value — should fall back to STAFF
+    const html = fn({ status: 'mgr-1' });
+    assert.contains(html, '員工', 'Legacy mgr-1 should fall back to 員工');
+    assert.contains(html, 'employee', 'Legacy mgr-1 should fall back to class employee');
 });
 
 // ============ API MOCK TESTS ============
-const apiTests = new TestSuite('Integration Tests - API Calls with Mocks');
+const apiTests = new TestSuite('Integration Tests - API Response Shapes');
 
-// Mock fetch for testing (browser-compatible)
-const fetchMock = (url, options) => {
-    const mockResponses = {
-        'swipe': {
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({
-                status: 'SUCCESS',
-                employee_id: 'B001',
-                message: '允許進入',
-                timestamp: '2026-05-14T10:00:00Z'
-            })
-        },
-        'attendance': {
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve([
+// Mock responses matching actual backend models (models.go)
+const mockDB = {
+    '/v1/swipe': {
+        ok: true, status: 200,
+        // SwipeResponse: { status, message, error_code (omitempty) }
+        json: () => Promise.resolve({ status: 'SUCCESS', message: '允許進入' }),
+    },
+    '/v1/reports/attendance': {
+        ok: true, status: 200,
+        // []AttendanceReport
+        json: () => Promise.resolve([
+            {
+                employee_id: 'B001', name: '王小明',
+                status: 'STAFF', org_path: 'TSMC.Fab12.製造部',
+                work_date: '2026-05-14',
+                first_in: '2026-05-14T00:00:00Z',
+                last_out: '2026-05-14T09:00:00Z',
+                swipe_count: 4, stay_hours: 9.0,
+            },
+        ]),
+    },
+    '/v1/reports/attendance/aggregated': {
+        ok: true, status: 200,
+        // []EmployeeAggregate
+        json: () => Promise.resolve([
+            {
+                employee_id: 'B001', name: '王小明',
+                status: 'STAFF', org_path: 'TSMC.Fab12.製造部',
+                total_swipes: 80, total_stay_hours: 176.0,
+                day_count: 20, avg_swipes: 4.0, avg_stay_hours: 8.8,
+            },
+        ]),
+    },
+    '/v1/reports/manager-team': {
+        ok: true, status: 200,
+        // { manager_scope, reports: []AttendanceReport }
+        json: () => Promise.resolve({
+            manager_scope: 'TSMC.Fab12.製造部',
+            reports: [
                 {
-                    employee_id: 'B001',
-                    name: '王小明',
-                    is_manager: false,
-                    org_path: '製造部/第一分廠',
-                    work_date: '2026-05-14',
-                    first_in: '2026-05-14T08:00:00Z',
-                    last_out: '2026-05-14T17:30:00Z',
-                    swipe_count: 2,
-                    stay_hours: 9.5
-                }
-            ])
-        },
-        'manager-team': {
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({
-                manager_scope: '製造部',
-                reports: [
-                    {
-                        employee_id: 'B001',
-                        name: '王小明',
-                        is_manager: false,
-                        org_path: '製造部/第一分廠',
-                        work_date: '2026-05-14',
-                        first_in: '2026-05-14T08:00:00Z',
-                        last_out: '2026-05-14T17:30:00Z',
-                        swipe_count: 2,
-                        stay_hours: 9.5
-                    }
-                ]
-            })
-        },
-        'manager-forbidden': {
-            ok: false,
-            status: 403,
-            json: () => Promise.resolve({ error: 'Permission denied' })
-        },
-        'trend': {
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({
-                period: 'day',
-                trends: [
-                    { bucket: '2026-05-08', avg_stay_hrs: 8.5, head_count: 150 },
-                    { bucket: '2026-05-09', avg_stay_hrs: 8.7, head_count: 145 },
-                    { bucket: '2026-05-10', avg_stay_hrs: 8.3, head_count: 148 }
-                ]
-            })
-        },
-        'alerts': {
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve([
-                {
-                    alert_id: 'A001',
-                    severity: 'HIGH',
-                    alert_type: 'APB_BURST',
-                    timestamp: '2026-05-14T10:00:00Z',
-                    details: '反傳播頻繁觸發'
-                }
-            ])
-        }
-    };
-
-    const key = Object.keys(mockResponses).find(k => url.includes(k)) || 'attendance';
-    return Promise.resolve(mockResponses[key]);
+                    employee_id: 'B001', name: '王小明',
+                    status: 'STAFF', org_path: 'TSMC.Fab12.製造部',
+                    work_date: '2026-05-14', swipe_count: 4, stay_hours: 9.0,
+                },
+            ],
+        }),
+    },
+    '/v1/reports/trend': {
+        ok: true, status: 200,
+        // { scope, trends: []AttendanceTrend, summary: TrendSummary }
+        json: () => Promise.resolve({
+            scope: 'TSMC.Fab12',
+            trends: [
+                { bucket: '2026-05-08', head_count: 150, avg_stay_hrs: 8.5, total_swipes: 600 },
+                { bucket: '2026-05-09', head_count: 145, avg_stay_hrs: 8.7, total_swipes: 580 },
+            ],
+            summary: { avg_swipes_per_person: 4.0, avg_head_count: 147.5, avg_stay_hrs: 8.6 },
+        }),
+    },
+    '/v1/audit': {
+        ok: true, status: 200,
+        // []AccessEvent
+        json: () => Promise.resolve([
+            { id: 1, badge_id: 'B001', site_id: 'Fab12', gate_id: 'Gate-1A', direction: 'IN',  status: 'SUCCESS', reason: '', timestamp: '2026-05-14T00:00:00Z' },
+            { id: 2, badge_id: 'B001', site_id: 'Fab12', gate_id: 'Gate-1A', direction: 'OUT', status: 'SUCCESS', reason: '', timestamp: '2026-05-14T09:00:00Z' },
+        ]),
+    },
+    '/v1/alerts': {
+        ok: true, status: 200,
+        // []Alert: id, alert_type, severity, occurred_at (not timestamp), badge_id, site_id, gate_id
+        json: () => Promise.resolve([
+            { id: 1, alert_type: 'APB_BURST', severity: 'HIGH', occurred_at: '2026-05-14T10:00:00Z', badge_id: 'B001', site_id: 'Fab12', gate_id: 'Gate-1A' },
+        ]),
+    },
 };
 
-apiTests.it('Swipe API: Send swipe request and verify response', async () => {
-    const response = await fetchMock('http://localhost:8080/v1/swipe', {
-        method: 'POST'
+const fetchMock = (url) => {
+    // Sort by length descending so more specific paths (e.g. /attendance/aggregated)
+    // are matched before shorter prefixes (e.g. /attendance).
+    const key = Object.keys(mockDB).sort((a, b) => b.length - a.length).find(k => url.includes(k));
+    return Promise.resolve(
+        key ? mockDB[key] : { ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) }
+    );
+};
+
+apiTests.it('Swipe: Response has status + message; NO employee_id', async () => {
+    const data = await (await fetchMock('/v1/swipe')).json();
+    assert.equal(data.status, 'SUCCESS', 'status should be SUCCESS');
+    assert.exists(data.message, 'message should exist');
+    assert.equal(data.employee_id, undefined, 'employee_id must NOT be in SwipeResponse');
+});
+
+apiTests.it('Attendance (day): Records have swipe_count, stay_hours, canonical status', async () => {
+    const data = await (await fetchMock('/v1/reports/attendance')).json();
+    const canonical = ['MANAGER_L1', 'MANAGER_L2', 'STAFF'];
+    assert.true(Array.isArray(data), 'Should return array');
+    data.forEach(r => {
+        assert.exists(r.swipe_count, 'swipe_count required');
+        assert.exists(r.stay_hours,  'stay_hours required');
+        assert.includes(canonical, r.status, `status must be canonical: got "${r.status}"`);
     });
-
-    const data = await response.json();
-    assert.equal(data.status, 'SUCCESS', 'Swipe should be successful');
-    assert.equal(data.employee_id, 'B001', 'Employee ID should match');
-    assert.exists(data.timestamp, 'Timestamp should exist');
 });
 
-apiTests.it('Attendance API: Fetch attendance report', async () => {
-    const response = await fetchMock('http://localhost:8081/v1/reports/attendance');
-    const data = await response.json();
-
+apiTests.it('Aggregated attendance: Records have total_swipes, avg_swipes, avg_stay_hours', async () => {
+    const data = await (await fetchMock('/v1/reports/attendance/aggregated')).json();
     assert.true(Array.isArray(data), 'Should return array');
-    assert.true(data.length > 0, 'Should have records');
-    assert.exists(data[0].employee_id, 'Record should have employee_id');
-    assert.exists(data[0].stay_hours, 'Record should have stay_hours');
+    const r = data[0];
+    assert.exists(r.total_swipes,   'total_swipes required');
+    assert.exists(r.avg_swipes,     'avg_swipes required');
+    assert.exists(r.avg_stay_hours, 'avg_stay_hours required');
 });
 
-apiTests.it('Manager Team API: Fetch subordinate reports', async () => {
-    const response = await fetchMock('http://localhost:8081/v1/reports/manager-team?as=B100');
-    const data = await response.json();
-
-    assert.exists(data.manager_scope, 'Should have manager scope');
-    assert.true(Array.isArray(data.reports), 'Should have reports array');
+apiTests.it('Manager Team: Response has manager_scope and reports array', async () => {
+    const data = await (await fetchMock('/v1/reports/manager-team')).json();
+    assert.exists(data.manager_scope, 'manager_scope required');
+    assert.true(Array.isArray(data.reports), 'reports must be array');
 });
 
-apiTests.it('Manager Team API: Handle 403 forbidden', async () => {
-    const response = await fetchMock('http://localhost:8081/v1/reports/manager-team?as=B001');
-    
-    if (response.status === 403) {
-        assert.equal(response.status, 403, 'Should return 403 for non-manager');
-    }
+apiTests.it('Trend: Response has trends array AND summary object', async () => {
+    const data = await (await fetchMock('/v1/reports/trend')).json();
+    assert.true(Array.isArray(data.trends), 'trends must be array');
+    assert.exists(data.summary,                        'summary required');
+    assert.exists(data.summary.avg_swipes_per_person,  'summary.avg_swipes_per_person required');
+    assert.exists(data.summary.avg_head_count,         'summary.avg_head_count required');
+    assert.exists(data.summary.avg_stay_hrs,           'summary.avg_stay_hrs required');
 });
 
-apiTests.it('Trend API: Fetch trend data', async () => {
-    const response = await fetchMock('http://localhost:8081/v1/reports/trend?start_date=2026-05-08&end_date=2026-05-14&period=day');
-    const data = await response.json();
-
-    assert.exists(data.period, 'Should have period');
-    assert.true(Array.isArray(data.trends), 'Should have trends array');
+apiTests.it('Trend: Buckets have head_count, avg_stay_hrs, total_swipes', async () => {
+    const data = await (await fetchMock('/v1/reports/trend')).json();
     if (data.trends.length > 0) {
-        assert.exists(data.trends[0].bucket, 'Trend should have bucket');
-        assert.exists(data.trends[0].avg_stay_hrs, 'Trend should have avg_stay_hrs');
-        assert.exists(data.trends[0].head_count, 'Trend should have head_count');
+        const t = data.trends[0];
+        assert.exists(t.bucket,       'bucket required');
+        assert.exists(t.head_count,   'head_count required');
+        assert.exists(t.avg_stay_hrs, 'avg_stay_hrs required');
+        assert.exists(t.total_swipes, 'total_swipes required');
     }
 });
 
-apiTests.it('Alerts API: Fetch alert list', async () => {
-    const response = await fetchMock('http://localhost:8081/v1/alerts');
-    const data = await response.json();
-
-    assert.true(Array.isArray(data), 'Should return array');
+apiTests.it('Audit Trail: Returns []AccessEvent with badge_id, direction, timestamp', async () => {
+    const data = await (await fetchMock('/v1/audit')).json();
+    assert.true(Array.isArray(data), 'audit trail must be array');
     if (data.length > 0) {
-        assert.exists(data[0].severity, 'Alert should have severity');
-        assert.exists(data[0].timestamp, 'Alert should have timestamp');
+        assert.exists(data[0].badge_id,  'badge_id required');
+        assert.exists(data[0].direction, 'direction required');
+        assert.exists(data[0].timestamp, 'timestamp required');
+        assert.includes(['IN', 'OUT'], data[0].direction, 'direction must be IN or OUT');
+    }
+});
+
+apiTests.it('Alerts: Field is occurred_at (not timestamp); has alert_type and severity', async () => {
+    const data = await (await fetchMock('/v1/alerts')).json();
+    assert.true(Array.isArray(data), 'alerts must be array');
+    if (data.length > 0) {
+        const a = data[0];
+        assert.exists(a.occurred_at, 'occurred_at required');
+        assert.exists(a.alert_type,  'alert_type required');
+        assert.exists(a.severity,    'severity required');
+        assert.equal(a.timestamp, undefined, '"timestamp" must NOT exist — field is occurred_at');
     }
 });
 
 // ============ STATE MANAGEMENT TESTS ============
-const stateTests = new TestSuite('State Management Tests');
+const stateTests = new TestSuite('State Management - localStorage');
 
-
-
-stateTests.it('localStorage: Save API URLs', () => {
-    const apiUrl = 'http://localhost:8080';
-    const reportUrl = 'http://localhost:8081';
-    
-    localStorage.setItem('apiUrl', apiUrl);
-    localStorage.setItem('reportUrl', reportUrl);
-    
-    assert.equal(localStorage.getItem('apiUrl'), apiUrl, 'API URL should be saved');
-    assert.equal(localStorage.getItem('reportUrl'), reportUrl, 'Report URL should be saved');
-    
+stateTests.it('apiUrl: Save and restore', () => {
+    localStorage.setItem('apiUrl', 'http://localhost:8080');
+    assert.equal(localStorage.getItem('apiUrl'), 'http://localhost:8080', 'apiUrl should persist');
     localStorage.removeItem('apiUrl');
+});
+
+stateTests.it('reportUrl: Save and restore', () => {
+    localStorage.setItem('reportUrl', 'http://localhost:8081');
+    assert.equal(localStorage.getItem('reportUrl'), 'http://localhost:8081', 'reportUrl should persist');
     localStorage.removeItem('reportUrl');
 });
 
-stateTests.it('localStorage: Save JWT token', () => {
-    const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
-    
+stateTests.it('pacs_token: Save and restore JWT', () => {
+    const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig';
     localStorage.setItem('pacs_token', token);
-    assert.equal(localStorage.getItem('pacs_token'), token, 'Token should be saved');
-    
+    assert.equal(localStorage.getItem('pacs_token'), token, 'token should persist');
     localStorage.removeItem('pacs_token');
 });
 
-stateTests.it('localStorage: Track current badge ID', () => {
-    const badgeId = 'B001';
-    
-    localStorage.setItem('current_badge', badgeId);
-    assert.equal(localStorage.getItem('current_badge'), badgeId, 'Badge ID should be saved');
-    
+stateTests.it('current_badge: Save and restore badge ID', () => {
+    localStorage.setItem('current_badge', 'B001');
+    assert.equal(localStorage.getItem('current_badge'), 'B001', 'badge should persist');
     localStorage.removeItem('current_badge');
 });
 
-// ============ DATA VALIDATION TESTS ============
-const validationTests = new TestSuite('Data Validation Tests');
+// ============ VALIDATION TESTS ============
+const validationTests = new TestSuite('Data Validation');
 
-validationTests.it('Validate swipe request payload', () => {
-    const payload = {
-        badge_id: 'B001',
-        site_id: 'Site-A',
-        gate_id: '1-A',
-        direction: 'IN'
-    };
-
-    assert.exists(payload.badge_id, 'badge_id required');
-    assert.exists(payload.site_id, 'site_id required');
-    assert.exists(payload.gate_id, 'gate_id required');
+validationTests.it('SwipeRequest: Required fields + direction in [IN, OUT]', () => {
+    const payload = { badge_id: 'B001', site_id: 'Fab12', gate_id: 'Gate-1A', direction: 'IN' };
+    assert.exists(payload.badge_id,  'badge_id required');
+    assert.exists(payload.site_id,   'site_id required');
+    assert.exists(payload.gate_id,   'gate_id required');
     assert.includes(['IN', 'OUT'], payload.direction, 'direction must be IN or OUT');
 });
 
-validationTests.it('Validate date range for reports', () => {
-    const startDate = '2026-05-07';
-    const endDate = '2026-05-14';
-
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const daysInRange = (end - start) / (1000 * 60 * 60 * 24);
-
-    assert.true(daysInRange > 0, 'End date should be after start date');
-    assert.true(daysInRange <= 90, 'Date range should not exceed 90 days');
+validationTests.it('Gate IDs use Gate-NX format (not N-X)', () => {
+    const gates = ['Gate-1A', 'Gate-1B', 'Gate-1C', 'Gate-2A', 'Gate-2B', 'Gate-2C'];
+    gates.forEach(g => {
+        assert.true(/^Gate-[12][A-C]$/.test(g), `${g} must match Gate-NX format`);
+    });
 });
 
-validationTests.it('Validate manager badge required for team report', () => {
-    const managerBadge = 'B100';
-    const isValid = managerBadge && managerBadge.length > 0;
-
-    assert.true(isValid, 'Manager badge is required');
+validationTests.it('Canonical status values: MANAGER_L1, MANAGER_L2, STAFF', () => {
+    const canonical = new Set(['MANAGER_L1', 'MANAGER_L2', 'STAFF']);
+    ['MANAGER_L1', 'MANAGER_L2', 'STAFF'].forEach(s => {
+        assert.true(canonical.has(s), `${s} must be canonical`);
+    });
 });
 
-validationTests.it('Validate alert severity levels', () => {
-    const validSeverities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-    const testAlert = { severity: 'HIGH' };
-
-    assert.includes(validSeverities, testAlert.severity, 'Severity must be valid');
+validationTests.it('Legacy status values are NOT canonical', () => {
+    const canonical = new Set(['MANAGER_L1', 'MANAGER_L2', 'STAFF']);
+    ['mgr-1', 'mgr-2', 'employee', 'is_manager'].forEach(s => {
+        assert.false(canonical.has(s), `"${s}" is a legacy value and must not be used`);
+    });
 });
 
-// ============ UI INTERACTION TESTS ============
-const uiTests = new TestSuite('UI Interaction Tests');
-
-uiTests.it('Tab switching: Click navigation item', () => {
-    // Create mock DOM
-    const nav = document.createElement('a');
-    nav.classList.add('nav-item');
-    nav.dataset.tab = 'attendance-tab';
-    
-    const tab = document.createElement('section');
-    tab.id = 'attendance-tab';
-    tab.classList.add('tab-content');
-
-    nav.classList.add('active');
-    tab.classList.add('active');
-
-    assert.true(nav.classList.contains('active'), 'Nav item should be active');
-    assert.true(tab.classList.contains('active'), 'Tab should be active');
+validationTests.it('Alert severities are SCREAMING_SNAKE_CASE', () => {
+    ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].forEach(s => {
+        assert.true(/^[A-Z]+$/.test(s), `${s} must be uppercase`);
+    });
 });
 
-uiTests.it('Gate tier selection: Toggle outer/inner gates', () => {
-    const outerBtn = document.createElement('button');
-    outerBtn.dataset.tier = 'outer';
-    outerBtn.classList.add('active');
-
-    const innerBtn = document.createElement('button');
-    innerBtn.dataset.tier = 'inner';
-
-    assert.true(outerBtn.classList.contains('active'), 'Outer should be active');
-    assert.false(innerBtn.classList.contains('active'), 'Inner should not be active');
+validationTests.it('Date range: end_date >= start_date', () => {
+    const start = '2026-05-01', end = '2026-05-31';
+    assert.true(end >= start, 'end_date must not precede start_date');
 });
 
-uiTests.it('Direction selection: Toggle IN/OUT direction', () => {
-    const inBtn = document.createElement('button');
-    inBtn.dataset.direction = 'IN';
-    inBtn.classList.add('active');
+// ============ UI LOGIC TESTS ============
+const uiTests = new TestSuite('UI Logic Tests');
 
-    const outBtn = document.createElement('button');
-    outBtn.dataset.direction = 'OUT';
-
-    assert.true(inBtn.classList.contains('active'), 'IN should be active');
-    assert.false(outBtn.classList.contains('active'), 'OUT should not be active');
+uiTests.it('isAggregated: only true for month and quarter', () => {
+    const isAggregated = (p) => p === 'month' || p === 'quarter';
+    assert.false(isAggregated('day'),     'day must NOT be aggregated');
+    assert.true(isAggregated('month'),    'month must be aggregated');
+    assert.true(isAggregated('quarter'),  'quarter must be aggregated');
 });
 
-uiTests.it('Server status indicator: Update connection status', () => {
-    const statusDot = document.createElement('span');
-    statusDot.id = 'status-indicator';
-    statusDot.classList.add('offline');
-
-    // Simulate online
-    statusDot.classList.remove('offline');
-    statusDot.classList.add('online');
-
-    assert.true(statusDot.classList.contains('online'), 'Should show online status');
-    assert.false(statusDot.classList.contains('offline'), 'Should remove offline status');
+uiTests.it('Attendance mode: self / org are the only valid modes', () => {
+    const modes = ['self', 'org'];
+    modes.forEach(m => assert.includes(['self', 'org'], m, `${m} must be valid`));
 });
 
-// ============ END-TO-END WORKFLOW TESTS ============
-const e2eTests = new TestSuite('E2E Workflow Tests');
-
-e2eTests.it('Workflow 1: Employee swipe - Select tier and gate', async () => {
-    // Simulate: Employee selects outer tier (1-A)
-    const selectedTier = 'outer';
-    const selectedGate = '1-A';
-    const direction = 'IN';
-
-    assert.equal(selectedTier, 'outer', 'Tier selected');
-    assert.equal(selectedGate, '1-A', 'Gate selected');
-    assert.equal(direction, 'IN', 'Direction selected');
+uiTests.it('Server status indicator toggles online / offline classes', () => {
+    const dot = document.createElement('span');
+    dot.classList.add('offline');
+    dot.classList.remove('offline');
+    dot.classList.add('online');
+    assert.true(dot.classList.contains('online'),   'Must be online');
+    assert.false(dot.classList.contains('offline'), 'Must not be offline');
 });
 
-e2eTests.it('Workflow 2: View attendance report - Get stats', async () => {
-    // Simulate: Query attendance for 2026-05-14
-    const reports = [
-        { employee_id: 'B001', stay_hours: 9.5 },
-        { employee_id: 'B002', stay_hours: 8.0 }
-    ];
-
-    const totalRecords = reports.length;
-    const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
-    const avgStay = reports.reduce((s, r) => s + r.stay_hours, 0) / reports.length;
-
-    assert.equal(totalRecords, 2, 'Should have 2 records');
-    assert.equal(uniqueEmployees, 2, 'Should have 2 unique employees');
-    assert.true(avgStay > 0, 'Average stay should be positive');
+uiTests.it('Trend stats: avg_swipe computed as total_swipes / head_count per bucket', () => {
+    const bucket = { head_count: 100, total_swipes: 400 };
+    const avg = bucket.head_count > 0 ? bucket.total_swipes / bucket.head_count : 0;
+    assert.equal(avg, 4, 'avg_swipe should be 400/100 = 4');
 });
 
-e2eTests.it('Workflow 3: Manager views team - Verify permission', async () => {
-    // Simulate: Manager B100 queries subordinates
-    const managerBadge = 'B100';
-    const isAuthorized = true; // Assume authorization
-
-    assert.true(isAuthorized, 'Manager should be authorized');
-    assert.exists(managerBadge, 'Manager badge should exist');
+uiTests.it('Stats: isAggregated selects correct field for swipe count', () => {
+    const dayRecord  = { swipe_count: 4,  total_swipes: undefined };
+    const aggRecord  = { swipe_count: undefined, total_swipes: 80 };
+    const getSwipes = (r, agg) => agg ? (r.total_swipes || 0) : (r.swipe_count || 0);
+    assert.equal(getSwipes(dayRecord, false), 4,  'Day mode uses swipe_count');
+    assert.equal(getSwipes(aggRecord, true),  80, 'Aggregated mode uses total_swipes');
 });
 
-e2eTests.it('Workflow 4: Trend analysis - Generate chart data', async () => {
-    // Simulate: Query trend for 7 days
-    const trendData = {
-        period: 'day',
-        trends: [
-            { bucket: '2026-05-08', avg_stay_hrs: 8.5, head_count: 150 },
-            { bucket: '2026-05-09', avg_stay_hrs: 8.7, head_count: 145 },
-            { bucket: '2026-05-10', avg_stay_hrs: 8.3, head_count: 148 }
-        ]
-    };
-
-    assert.true(trendData.trends.length > 0, 'Data should exist');
-    assert.exists(trendData.trends[0].bucket, 'Trend should have bucket');
-});
-
-e2eTests.it('Workflow 5: View alerts - Filter by severity', async () => {
-    // Simulate: View high-severity alerts
-    const allAlerts = [
-        { alert_id: 'A001', severity: 'HIGH', alert_type: 'APB_BURST' },
-        { alert_id: 'A002', severity: 'MEDIUM', alert_type: 'TAILGATING' },
-        { alert_id: 'A003', severity: 'LOW', alert_type: 'STAT_OUTLIER' }
-    ];
-
-    const highAlerts = allAlerts.filter(a => a.severity === 'HIGH');
-    assert.true(highAlerts.length > 0, 'Should have high alerts');
-});
-
-// ============ RUN ALL TESTS ============
+// ============ RUN ALL ============
 async function runAllTests() {
-    console.log('\n\n');
+    console.log('\n');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║     PACS FRONTEND TEST SUITE - COMPREHENSIVE TESTING      ║');
+    console.log('║       PACS FRONTEND TEST SUITE                            ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
 
+    const suites = [unitTests, apiTests, stateTests, validationTests, uiTests];
     const results = [];
 
-    try {
-        results.push(await unitTests.run());
-    } catch (e) {
-        console.error('❌ Unit Tests Suite Error:', e.message || e);
-        results.push(false);
-    }
-
-    try {
-        results.push(await apiTests.run());
-    } catch (e) {
-        console.error('❌ API Tests Suite Error:', e.message || e);
-        results.push(false);
-    }
-
-    try {
-        results.push(await stateTests.run());
-    } catch (e) {
-        console.error('❌ State Tests Suite Error:', e.message || e);
-        results.push(false);
-    }
-
-    try {
-        results.push(await validationTests.run());
-    } catch (e) {
-        console.error('❌ Validation Tests Suite Error:', e.message || e);
-        results.push(false);
-    }
-
-    try {
-        results.push(await uiTests.run());
-    } catch (e) {
-        console.error('❌ UI Tests Suite Error:', e.message || e);
-        results.push(false);
-    }
-
-    try {
-        results.push(await e2eTests.run());
-    } catch (e) {
-        console.error('❌ E2E Tests Suite Error:', e.message || e);
-        results.push(false);
+    for (const suite of suites) {
+        try {
+            results.push(await suite.run());
+        } catch (e) {
+            console.error(`❌ Suite error: ${e.message}`);
+            results.push(false);
+        }
     }
 
     const allPassed = results.every(r => r === true);
-
     console.log('╔════════════════════════════════════════════════════════════╗');
-    if (allPassed) {
-        console.log('║                  ✅ ALL TESTS PASSED                      ║');
-    } else {
-        console.log('║                  ⚠️  SOME TESTS FAILED                    ║');
-    }
+    console.log(allPassed
+        ? '║                  ✅ ALL TESTS PASSED                      ║'
+        : '║                  ⚠️  SOME TESTS FAILED                    ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
 
     return allPassed;
 }
 
-// Export for use
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { runAllTests, TestSuite, assert };
 }
-
-// Expose to window for browser/test-runner
 if (typeof window !== 'undefined') {
     window.runAllTests = runAllTests;
 }

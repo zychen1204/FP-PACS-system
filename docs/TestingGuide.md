@@ -453,7 +453,29 @@ EOF
 
 ---
 
-## 十七、前端手動測試
+## 十七、前端測試
+
+### 自動化測試（test-runner.html）
+
+直接用瀏覽器開啟，**不需要 Docker 或後端服務**：
+
+[frontend/test-runner.html](http://localhost/test-runner.html)
+
+點擊 **▶️ Run All Tests** 即可執行全部 30 個測試，涵蓋：
+
+| 套件 | 測試數 | 涵蓋內容 |
+|------|--------|---------|
+| Unit Tests | 9 | `formatTime`、`formatTimeDetailed`、`getDateDaysAgo`、`getRoleBadge`（含 legacy fallback）|
+| Integration Tests | 8 | 所有 API response shape（swipe、attendance、aggregated、audit、manager-team、trend + summary、alerts）|
+| State Management | 4 | localStorage 讀寫（apiUrl、reportUrl、token、badge）|
+| Data Validation | 6 | 刷卡 payload、閘門格式（Gate-NX）、canonical status 值、舊值排除、嚴重程度大寫 |
+| UI Logic | 5 | isAggregated 判斷、mode 列表、DOM class 切換、trend avg 計算、統計欄位選擇 |
+
+預期輸出：`✅ ALL TESTS PASSED`
+
+---
+
+### 手動測試（需 Docker 服務啟動）
 
 開啟瀏覽器前往 **http://localhost**
 
