@@ -54,7 +54,7 @@ go run . --mode local --days 30 --clear
 docker compose exec -T postgres psql -U pacs_user -d pacs_db < seed_history_events.sql
 
 ```
-### 3.前往前端介面 出席報表、主管視野、趨勢分析、 更改日期看紀錄
+### 3.前往前端介面 出席報表輸入ID看報表 (注意ID是 B-000001 ~ B-001000 )
 http://localhost/
 
 
