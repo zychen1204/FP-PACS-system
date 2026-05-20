@@ -272,7 +272,9 @@ const mockDB = {
 };
 
 const fetchMock = (url) => {
-    const key = Object.keys(mockDB).find(k => url.includes(k));
+    // Sort by length descending so more specific paths (e.g. /attendance/aggregated)
+    // are matched before shorter prefixes (e.g. /attendance).
+    const key = Object.keys(mockDB).sort((a, b) => b.length - a.length).find(k => url.includes(k));
     return Promise.resolve(
         key ? mockDB[key] : { ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) }
     );

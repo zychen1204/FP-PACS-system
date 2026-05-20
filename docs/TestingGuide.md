@@ -459,9 +459,7 @@ EOF
 
 直接用瀏覽器開啟，**不需要 Docker 或後端服務**：
 
-```
-frontend/test-runner.html
-```
+[frontend/test-runner.html](../frontend/test-runner.html)
 
 點擊 **▶️ Run All Tests** 即可執行全部 30 個測試，涵蓋：
 
