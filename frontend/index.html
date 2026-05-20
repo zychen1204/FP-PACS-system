@@ -170,7 +170,7 @@
             <section id="attendance-tab" class="tab-content">
                 <div class="card">
                     <div class="card-header">
-                        <h3>📊 出席報表（主管視野）</h3>
+                        <h3>📊 出席報表</h3>
                         <p>查看自己或底下組織的出席紀錄</p>
                     </div>
 
@@ -240,20 +240,8 @@
                         </div>
                         <div id="attendance-stats" class="stats-grid"></div>
                         <div class="table-wrapper">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>員工 ID</th>
-                                        <th>姓名</th>
-                                        <th>身分</th>
-                                        <th>部門</th>
-                                        <th>日期</th>
-                                        <th>進入時間</th>
-                                        <th>離開時間</th>
-                                        <th>刷卡次數</th>
-                                        <th>停留時數</th>
-                                    </tr>
-                                </thead>
+                            <table class="table" id="attendance-table">
+                                <thead id="attendance-thead"></thead>
                                 <tbody id="attendance-tbody">
                                     <tr class="empty">
                                         <td colspan="9">選擇查詢模式後點擊「查詢」</td>
@@ -373,32 +361,15 @@
         </div>
     </main>
 
-    <!-- Trend Analysis Modal -->
+    <!-- Trend / Audit Modal -->
     <div id="trend-modal" class="modal-overlay" style="display:none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="trend-modal-title">📈 趨勢分析</h3>
+                <h3 id="trend-modal-title">📈 分析</h3>
                 <button id="btn-close-trend-modal" class="modal-close">✕</button>
             </div>
-            <div class="modal-body">
-                <div id="trend-modal-scope" class="manager-scope-display" style="display:none; margin-bottom:16px;">
-                    <div class="scope-info">
-                        <span>分析範圍: </span>
-                        <strong id="trend-modal-scope-text">-</strong>
-                    </div>
-                </div>
-                <div class="form-group" style="margin-bottom:16px;">
-                    <label for="trend-modal-metric">顯示指標</label>
-                    <select id="trend-modal-metric">
-                        <option value="avg_stay_hrs">平均停留時數</option>
-                        <option value="head_count">出勤人頭數</option>
-                        <option value="total_swipes">總刷卡次數</option>
-                    </select>
-                </div>
+            <div id="trend-modal-body" class="modal-body">
                 <div id="trend-modal-loading" style="text-align:center; padding:40px; color:var(--text-secondary);">載入中...</div>
-                <div class="chart-container" id="trend-modal-chart-wrap" style="display:none;">
-                    <canvas id="trend-modal-chart"></canvas>
-                </div>
             </div>
         </div>
     </div>

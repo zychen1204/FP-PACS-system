@@ -1423,3 +1423,162 @@ hr {
     border: 1px solid var(--success);
 }
 
+/* ============================================
+   Audit Trail Modal Styles
+   ============================================ */
+
+.audit-trail-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 0;
+    max-height: 440px;
+    overflow-y: auto;
+}
+
+.audit-header-row {
+    display: grid;
+    grid-template-columns: 32px 90px 90px 80px 90px 80px 1fr;
+    gap: 8px;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.audit-event-row {
+    display: grid;
+    grid-template-columns: 32px 90px 90px 80px 90px 80px 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 14px;
+    background: var(--bg-hover);
+    border-radius: 6px;
+    border-left: 3px solid var(--border);
+    transition: var(--transition);
+}
+
+.audit-event-row:hover {
+    border-left-color: var(--primary-light);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.audit-row-fail {
+    border-left-color: var(--danger) !important;
+    background: rgba(239, 68, 68, 0.06) !important;
+}
+
+.audit-status.ok   { color: #10b981; font-weight: 600; font-size: 12px; }
+.audit-status.fail { color: #ef4444; font-weight: 600; font-size: 12px; }
+
+.audit-site {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.audit-seq {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 24px;
+}
+
+.audit-gate {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-light);
+    min-width: 72px;
+}
+
+.audit-session {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    flex-wrap: wrap;
+}
+
+.audit-in, .audit-out {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.audit-in strong, .audit-out strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.audit-arrow {
+    color: var(--border);
+    font-size: 14px;
+}
+
+.audit-duration {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--warning);
+    white-space: nowrap;
+}
+
+/* legacy aliases */
+.audit-time { font-size: 13px; font-weight: 700; color: var(--text-primary); min-width: 60px; font-variant-numeric: tabular-nums; }
+.audit-dir  { font-size: 13px; min-width: 56px; }
+.audit-reason { font-size: 12px; font-weight: 600; }
+
+/* ============================================
+   Org Trend Stats Grid
+   ============================================ */
+
+.org-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.org-stat-card {
+    background: var(--bg-hover);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+.org-stat-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.org-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--primary-light);
+}
+
+.org-trend-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.org-trend-controls label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.org-trend-controls select {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+}
+
+

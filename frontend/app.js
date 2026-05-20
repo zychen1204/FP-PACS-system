@@ -17,8 +17,10 @@ const state = {
     trendChart: null,
     modalChart: null,
     modalTrendData: null,
+    modalPersonalData: null,
     modalBadge: null,
     modalScope: null,
+    modalOrgPeriod: null,
     
     // UI State
     selectedTier: 'outer',
@@ -427,6 +429,9 @@ function selectPeriod(e) {
     document.getElementById('picker-day').style.display = period === 'day' ? '' : 'none';
     document.getElementById('picker-month').style.display = period === 'month' ? '' : 'none';
     document.getElementById('picker-quarter').style.display = period === 'quarter' ? '' : 'none';
+    // Hide trend button whenever period changes — user must re-query
+    const orgTrendBtn = document.getElementById('btn-org-trend');
+    if (orgTrendBtn) orgTrendBtn.style.display = 'none';
 }
 
 function getPeriodDateRange() {
@@ -460,6 +465,25 @@ function getPeriodDateRange() {
 }
 
 // ============ ATTENDANCE REPORT ============
+function aggregateByEmployee(reports, period) {
+    const map = {};
+    for (const r of reports) {
+        const id = r.employee_id;
+        if (!map[id]) {
+            map[id] = { employee_id: id, name: r.name, status: r.status, org_path: r.org_path,
+                        total_swipes: 0, total_stay_hours: 0, day_count: 0 };
+        }
+        map[id].total_swipes += r.swipe_count || 0;
+        map[id].total_stay_hours += r.stay_hours || 0;
+        map[id].day_count += 1;
+    }
+    return Object.values(map).map(e => ({
+        ...e,
+        avg_swipes: e.day_count > 0 ? e.total_swipes / e.day_count : 0,
+        avg_stay_hours: e.day_count > 0 ? e.total_stay_hours / e.day_count : 0
+    }));
+}
+
 async function fetchAttendance() {
     const employeeId = document.getElementById('attendance-employee-id')?.value?.trim();
     const mode = document.querySelector('input[name="attendance-mode"]:checked')?.value || 'self';
@@ -470,10 +494,17 @@ async function fetchAttendance() {
         return;
     }
 
+    if (!startDate) {
+        const labels = { day: '日期', month: '月份', quarter: '季度' };
+        displayAttendanceError(`請選擇${labels[period] || '日期'}`);
+        return;
+    }
+
     try {
         if (mode === 'org') {
+            // For month/quarter, fetch all (no date) then filter client-side
             let url = `${getReportUrl()}/v1/reports/manager-team?as=${employeeId}`;
-            if (startDate) url += `&date=${startDate}`;
+            if (period === 'day' && startDate) url += `&date=${startDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
@@ -481,15 +512,19 @@ async function fetchAttendance() {
             if (response.status === 403) throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
             if (!response.ok) throw new Error(data.error || '查詢失敗');
 
+            let reports = data.reports || [];
+            if (period !== 'day' && startDate && endDate) {
+                reports = reports.filter(r => r.work_date >= startDate && r.work_date <= endDate);
+            }
             state.currentOrgScope = data.manager_scope;
-            displayAttendanceReport(data.reports || [], data.manager_scope, mode);
+            state.lastReports = reports;
+            displayAttendanceReport(reports, data.manager_scope, mode, period);
         } else {
             let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
-            if (startDate) url += `&date=${startDate}`;
+            if (period === 'day' && startDate) url += `&date=${startDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
-
             if (!response.ok) throw new Error(data.error || '查詢失敗');
 
             let filtered = data.filter(r => r.employee_id === employeeId);
@@ -497,14 +532,47 @@ async function fetchAttendance() {
                 filtered = filtered.filter(r => r.work_date >= startDate && r.work_date <= endDate);
             }
             state.currentOrgScope = null;
-            displayAttendanceReport(filtered, null, mode);
+            state.lastReports = filtered;
+            displayAttendanceReport(filtered, null, mode, period);
         }
     } catch (error) {
         displayAttendanceError(error.message);
     }
 }
 
-function displayAttendanceReport(reports, scope, mode) {
+function buildAttendanceHeader(period, mode) {
+    const thead = document.getElementById('attendance-thead');
+    if (!thead) return;
+    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : '';
+    if (period === 'day') {
+        if (mode === 'self') {
+            thead.innerHTML = `<tr>
+                <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
+                <th>最早進入時間</th><th>最晚離開時間</th>
+            </tr>`;
+        } else {
+            thead.innerHTML = `<tr>
+                <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
+                <th>日期</th><th>進入時間</th><th>離開時間</th><th>刷卡次數</th><th>停留時數</th>
+            </tr>`;
+        }
+    } else {
+        if (mode === 'self') {
+            thead.innerHTML = `<tr>
+                <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
+                <th>${prefix}刷卡平均次</th><th>${prefix}平均停留時數</th>
+            </tr>`;
+        } else {
+            thead.innerHTML = `<tr>
+                <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
+                <th>${prefix}刷卡總數</th><th>${prefix}刷卡平均次</th>
+                <th>${prefix}總停留時數</th><th>${prefix}平均停留時數</th>
+            </tr>`;
+        }
+    }
+}
+
+function displayAttendanceReport(reports, scope, mode, period) {
     const statsContainer = document.getElementById('attendance-stats');
     const tbody = document.getElementById('attendance-tbody');
     const scopeBar = document.getElementById('attendance-scope-bar');
@@ -515,42 +583,81 @@ function displayAttendanceReport(reports, scope, mode) {
     if (scope) scopeEl.textContent = scope;
     if (orgTrendBtn) orgTrendBtn.style.display = (mode === 'org' && scope) ? '' : 'none';
 
+    buildAttendanceHeader(period, mode);
+
+    const selfDayColCount = 6;
+    const selfPeriodColCount = 6;
+    const orgDayColCount = 9;
+    const orgPeriodColCount = 8;
+    const colCount = mode === 'self'
+        ? (period === 'day' ? selfDayColCount : selfPeriodColCount)
+        : (period === 'day' ? orgDayColCount : orgPeriodColCount);
+
     if (!reports || reports.length === 0) {
         statsContainer.innerHTML = '<p class="placeholder">無資料</p>';
-        tbody.innerHTML = '<tr class="empty"><td colspan="9">無結果</td></tr>';
+        tbody.innerHTML = `<tr class="empty"><td colspan="${colCount}">無結果</td></tr>`;
         return;
     }
 
+    // Stats
+    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : '';
     const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
     const totalSwipes = reports.reduce((sum, r) => sum + (r.swipe_count || 0), 0);
-    const avgStayHours = (reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0) / reports.length).toFixed(1);
+    const totalStayHours = reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0).toFixed(1);
 
-    statsContainer.innerHTML = `
-        <div class="stat-item"><div class="stat-item-value">${reports.length}</div><div class="stat-item-label">總紀錄</div></div>
-        <div class="stat-item"><div class="stat-item-value">${uniqueEmployees}</div><div class="stat-item-label">員工數</div></div>
-        <div class="stat-item"><div class="stat-item-value">${totalSwipes}</div><div class="stat-item-label">刷卡次</div></div>
-        <div class="stat-item"><div class="stat-item-value">${avgStayHours}</div><div class="stat-item-label">平均停留</div></div>
-    `;
+    if (mode === 'org') {
+        statsContainer.innerHTML = `
+            <div class="stat-item"><div class="stat-item-value">${uniqueEmployees}</div><div class="stat-item-label">員工數</div></div>
+            <div class="stat-item"><div class="stat-item-value">${totalSwipes}</div><div class="stat-item-label">總刷卡次數</div></div>
+            <div class="stat-item"><div class="stat-item-value">${totalStayHours} hr</div><div class="stat-item-label">總停留時數</div></div>
+        `;
+    } else {
+        const swipeLabel = prefix ? `${prefix}總刷卡次數` : '總刷卡次數';
+        const stayLabel = prefix ? `${prefix}總停留時數` : '總停留時數';
+        statsContainer.innerHTML = `
+            <div class="stat-item"><div class="stat-item-value">${totalSwipes}</div><div class="stat-item-label">${swipeLabel}</div></div>
+            <div class="stat-item"><div class="stat-item-value">${totalStayHours} hr</div><div class="stat-item-label">${stayLabel}</div></div>
+        `;
+    }
 
-    tbody.innerHTML = reports.map(report => {
-        const identity = getRoleBadge(report);
-        return `
-        <tr class="clickable-row" data-id="${report.employee_id}" data-name="${report.name || report.employee_id}" style="cursor:pointer;" title="點擊查看趨勢分析">
-            <td>${report.employee_id}</td>
-            <td>${report.name || '-'}</td>
-            <td>${identity}</td>
-            <td>${report.org_path || '-'}</td>
-            <td>${report.work_date || '-'}</td>
-            <td>${formatTime(report.first_in)}</td>
-            <td>${formatTime(report.last_out)}</td>
-            <td><strong>${report.swipe_count}</strong></td>
-            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
-        </tr>`;
-    }).join('');
+    if (period === 'day') {
+        tbody.innerHTML = reports.map(r => {
+            const identity = getRoleBadge(r);
+            if (mode === 'self') {
+                return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" style="cursor:pointer;" title="點擊查看當日刷卡紀錄">
+                    <td>${r.employee_id}</td><td>${r.name || '-'}</td><td>${identity}</td><td>${r.org_path || '-'}</td>
+                    <td>${formatTime(r.first_in)}</td><td>${formatTime(r.last_out)}</td>
+                </tr>`;
+            }
+            return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" style="cursor:pointer;" title="點擊查看當日刷卡紀錄">
+                <td>${r.employee_id}</td><td>${r.name || '-'}</td><td>${identity}</td><td>${r.org_path || '-'}</td>
+                <td>${r.work_date || '-'}</td><td>${formatTime(r.first_in)}</td><td>${formatTime(r.last_out)}</td>
+                <td><strong>${r.swipe_count}</strong></td><td>${r.stay_hours ? r.stay_hours.toFixed(1) + ' hr' : '-'}</td>
+            </tr>`;
+        }).join('');
+    } else {
+        const aggregated = aggregateByEmployee(reports, period);
+        tbody.innerHTML = aggregated.map(e => {
+            const identity = getRoleBadge(e);
+            if (mode === 'self') {
+                return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
+                    <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
+                    <td>${e.avg_swipes.toFixed(1)}</td><td>${e.avg_stay_hours.toFixed(1)} hr</td>
+                </tr>`;
+            }
+            return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
+                <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
+                <td><strong>${e.total_swipes}</strong></td><td>${e.avg_swipes.toFixed(1)}</td>
+                <td>${e.total_stay_hours.toFixed(1)} hr</td><td>${e.avg_stay_hours.toFixed(1)} hr</td>
+            </tr>`;
+        }).join('');
+    }
 
     document.querySelectorAll('#attendance-tbody .clickable-row').forEach(row => {
         row.addEventListener('click', () => {
-            showEmployeeTrend(row.dataset.id, row.dataset.name);
+            const { id, name, date, type } = row.dataset;
+            if (type === 'audit') showDayAuditModal(id, name, date);
+            else showPersonalTrendModal(id, name);
         });
         row.addEventListener('mouseenter', () => row.style.background = 'rgba(30,64,175,0.15)');
         row.addEventListener('mouseleave', () => row.style.background = '');
@@ -562,7 +669,6 @@ function displayAttendanceError(message) {
     const tbody = document.getElementById('attendance-tbody');
     const scopeBar = document.getElementById('attendance-scope-bar');
     const orgTrendBtn = document.getElementById('btn-org-trend');
-
     if (scopeBar) scopeBar.style.display = 'none';
     if (orgTrendBtn) orgTrendBtn.style.display = 'none';
     statsContainer.innerHTML = `<div style="color: var(--danger);">❌ ${message}</div>`;
@@ -574,10 +680,8 @@ async function exportAttendanceExcel() {
     try {
         let url = `${getReportUrl()}/v1/reports/attendance/export`;
         if (startDate) url += `?date=${startDate}`;
-
         const response = await fetch(url);
         if (!response.ok) throw new Error('匯出失敗');
-
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -590,115 +694,318 @@ async function exportAttendanceExcel() {
     }
 }
 
-// ============ TREND MODAL ============
-function showEmployeeTrend(employeeId, name) {
-    document.getElementById('trend-modal-title').textContent = `📈 ${name}（${employeeId}）趨勢分析`;
-    const scopeBar = document.getElementById('trend-modal-scope');
-    if (scopeBar) scopeBar.style.display = 'none';
-    state.modalBadge = employeeId;
-    state.modalScope = null;
-    openTrendModal();
+// ============ MODAL HELPERS ============
+function openModal(title) {
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    document.getElementById('trend-modal-title').textContent = title;
+    document.getElementById('trend-modal-body').innerHTML =
+        `<div id="trend-modal-loading" style="text-align:center;padding:40px;color:var(--text-secondary);">載入中...</div>`;
+    document.getElementById('trend-modal').style.display = 'flex';
 }
 
-function showOrgTrend() {
-    const scope = state.currentOrgScope;
-    if (!scope) return;
-    document.getElementById('trend-modal-title').textContent = `📈 底下組織趨勢分析`;
-    const scopeBar = document.getElementById('trend-modal-scope');
-    const scopeText = document.getElementById('trend-modal-scope-text');
-    if (scopeBar) scopeBar.style.display = '';
-    if (scopeText) scopeText.textContent = scope;
-    state.modalBadge = null;
-    state.modalScope = scope;
-    openTrendModal();
+function setModalContent(html) {
+    document.getElementById('trend-modal-body').innerHTML = html;
 }
 
-async function openTrendModal() {
-    const modal = document.getElementById('trend-modal');
-    modal.style.display = 'flex';
-    document.getElementById('trend-modal-loading').style.display = 'block';
-    document.getElementById('trend-modal-chart-wrap').style.display = 'none';
-
-    const { period, startDate, endDate } = getPeriodDateRange();
-    const apiPeriod = period === 'day' ? 'day' : period === 'month' ? 'month' : 'quarter';
-
-    let url = `${getReportUrl()}/v1/reports/trend?period=${apiPeriod}`;
-    if (startDate) url += `&start_date=${startDate}`;
-    if (endDate) url += `&end_date=${endDate}`;
-    if (state.modalBadge) url += `&as=${state.modalBadge}`;
-
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || '查詢失敗');
-
-        state.modalTrendData = (data.trends || []).reverse();
-        document.getElementById('trend-modal-loading').style.display = 'none';
-        document.getElementById('trend-modal-chart-wrap').style.display = 'block';
-        renderModalChart(state.modalTrendData);
-    } catch (err) {
-        document.getElementById('trend-modal-loading').textContent = `❌ ${err.message}`;
-    }
+function closeTrendModal() {
+    document.getElementById('trend-modal').style.display = 'none';
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    state.modalTrendData = null;
 }
 
-function renderModalChart(trends) {
-    if (state.modalChart) {
-        state.modalChart.destroy();
-        state.modalChart = null;
-    }
-    const ctx = document.getElementById('trend-modal-chart');
-    if (!ctx || !trends || trends.length === 0) return;
-
-    const metric = document.getElementById('trend-modal-metric')?.value || 'avg_stay_hrs';
-    const metricConfig = {
-        avg_stay_hrs: { label: '平均停留時數 (hrs)', color: '#3b82f6', unit: '時數 (hrs)' },
-        head_count:   { label: '出勤人頭數 (persons)', color: '#10b981', unit: '人數 (persons)' },
-        total_swipes: { label: '總刷卡次數 (counts)', color: '#fbbf24', unit: '次數 (counts)' }
+function buildLineChart(canvasId, labels, datasets) {
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const chartOptions = {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#f1f5f9' } } },
+        scales: {
+            x: { ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' } }
+        }
     };
-    const cfg = metricConfig[metric];
+    if (datasets.length === 1) {
+        chartOptions.scales.y = {
+            beginAtZero: true,
+            ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }
+        };
+    } else {
+        chartOptions.scales.y = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }, position: 'left' };
+        chartOptions.scales.y1 = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { drawOnChartArea: false }, position: 'right' };
+    }
+    state.modalChart = new Chart(ctx, { type: 'line', data: { labels, datasets }, options: chartOptions });
+}
 
+function buildBarChart(canvasId, labels, datasets) {
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
     state.modalChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: trends.map(t => t.bucket),
-            datasets: [{
-                label: cfg.label,
-                data: trends.map(t => t[metric]),
-                borderColor: cfg.color,
-                backgroundColor: cfg.color + '22',
-                tension: 0.4,
-                fill: true,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }]
-        },
+        type: 'bar',
+        data: { labels, datasets },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            responsive: true, maintainAspectRatio: false,
             plugins: { legend: { labels: { color: '#f1f5f9' } } },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    title: { display: true, text: cfg.unit, color: '#94a3b8', font: { size: 12 } },
-                    ticks: { color: '#f1f5f9' },
-                    grid: { color: 'rgba(71,85,105,0.2)' }
-                },
-                x: {
-                    ticks: { color: '#f1f5f9' },
-                    grid: { color: 'rgba(71,85,105,0.2)' }
-                }
+                x: { ticks: { color: '#f1f5f9', maxRotation: 45 }, grid: { color: 'rgba(71,85,105,0.2)' } },
+                y: { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' } }
             }
         }
     });
 }
 
-function closeTrendModal() {
-    document.getElementById('trend-modal').style.display = 'none';
-    if (state.modalChart) {
-        state.modalChart.destroy();
-        state.modalChart = null;
+// ============ DAY MODE: AUDIT TRAIL ============
+async function showDayAuditModal(employeeId, name, date) {
+    openModal(`🗂️ ${name}（${employeeId}）— ${date} 刷卡紀錄`);
+    try {
+        const url = `${getReportUrl()}/v1/audit?badge_id=${employeeId}&start_date=${date}&end_date=${date}`;
+        const response = await fetch(url);
+        const events = await response.json();
+        if (!response.ok) throw new Error(events.error || '查詢失敗');
+
+        if (!events || events.length === 0) {
+            setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">當日無刷卡紀錄</p>');
+            return;
+        }
+
+        const sorted = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        const header = `
+            <div class="audit-header-row">
+                <span>#</span>
+                <span>時間</span>
+                <span>方向</span>
+                <span>廠區</span>
+                <span>閘門</span>
+                <span>狀態</span>
+                <span>備註</span>
+            </div>`;
+
+        const rows = sorted.map((e, i) => {
+            const time = formatTimeDetailed(e.timestamp);
+            const dirIcon = e.direction === 'IN' ? '📥 進入' : '📤 離開';
+            const site = e.site_id || '-';
+            const gate = e.gate_id || '-';
+            const ok = e.status === 'SUCCESS';
+            const statusHtml = ok
+                ? '<span class="audit-status ok">✅ 成功</span>'
+                : '<span class="audit-status fail">❌ 失敗</span>';
+            const reason = e.reason || '-';
+            return `<div class="audit-event-row ${ok ? '' : 'audit-row-fail'}">
+                <span class="audit-seq">#${i + 1}</span>
+                <span class="audit-time">${time}</span>
+                <span class="audit-dir">${dirIcon}</span>
+                <span class="audit-site">${site}</span>
+                <span class="audit-gate">${gate}</span>
+                <span>${statusHtml}</span>
+                <span class="audit-reason">${reason}</span>
+            </div>`;
+        }).join('');
+
+        setModalContent(`<div class="audit-trail-container">${header}${rows}</div>`);
+    } catch (err) {
+        setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
     }
-    state.modalTrendData = null;
+}
+
+// ============ MONTH/QUARTER MODE: PERSONAL TREND ============
+function showPersonalTrendModal(employeeId, name) {
+    openModal(`📈 ${name}（${employeeId}）出勤趨勢`);
+
+    const dailyData = (state.lastReports || [])
+        .filter(r => r.employee_id === employeeId)
+        .sort((a, b) => a.work_date.localeCompare(b.work_date));
+
+    if (!dailyData.length) {
+        setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
+        return;
+    }
+
+    state.modalPersonalData = dailyData;
+
+    setModalContent(`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <label style="font-size:13px;color:var(--text-secondary);">顯示指標</label>
+            <select id="personal-trend-metric" onchange="reRenderPersonalChart()" style="background:var(--bg-hover);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;">
+                <option value="swipe_count">刷卡次數</option>
+                <option value="stay_hours">停留時數 (hrs)</option>
+            </select>
+        </div>
+        <div class="chart-container" style="height:320px;"><canvas id="modal-personal-chart"></canvas></div>
+    `);
+
+    requestAnimationFrame(() => reRenderPersonalChart());
+}
+
+function reRenderPersonalChart() {
+    const dailyData = state.modalPersonalData;
+    if (!dailyData || !dailyData.length) return;
+    const metric = document.getElementById('personal-trend-metric')?.value || 'swipe_count';
+
+    const metricCfg = {
+        swipe_count: { label: '刷卡次數',      yTitle: '次數',       color: '#3b82f6' },
+        stay_hours:  { label: '停留時數 (hrs)', yTitle: '時數 (hrs)', color: '#10b981' },
+    };
+    const cfg = metricCfg[metric];
+
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    const ctx = document.getElementById('modal-personal-chart');
+    if (!ctx) return;
+
+    const labels = dailyData.map(r => r.work_date);
+    const data   = dailyData.map(r => metric === 'swipe_count'
+        ? (r.swipe_count || 0)
+        : parseFloat((r.stay_hours || 0).toFixed(2)));
+
+    state.modalChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets: [{ label: cfg.label, data, borderColor: cfg.color, backgroundColor: cfg.color + '22', tension: 0.4, fill: true, pointRadius: 4 }] },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#f1f5f9' } } },
+            scales: {
+                x: { ticks: { color: '#f1f5f9', maxRotation: 45 }, grid: { color: 'rgba(71,85,105,0.2)' } },
+                y: { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }, title: { display: true, text: cfg.yTitle, color: '#94a3b8' } }
+            }
+        }
+    });
+}
+
+// ============ ORG TREND ============
+async function showOrgTrend() {
+    const scope = state.currentOrgScope;
+    if (!scope) return;
+
+    const managerId = document.getElementById('attendance-employee-id')?.value?.trim();
+    const { period, startDate, endDate } = getPeriodDateRange();
+    openModal(`📈 底下組織趨勢分析 — ${scope}`);
+
+    // orgSize from the already-fetched lastReports (today's org snapshot)
+    const orgSize = new Set((state.lastReports || []).map(r => r.employee_id)).size || 1;
+    state.modalOrgPeriod = period;
+
+    if (period === 'day') {
+        // ── Day mode: bar chart per employee from state.lastReports ──
+        const reports = state.lastReports || [];
+        state.modalTrendData = { type: 'day', reports, orgSize };
+
+        const byDate = {};
+        for (const r of reports) {
+            if (!byDate[r.work_date]) byDate[r.work_date] = { swipes: 0, persons: new Set(), stay: 0 };
+            byDate[r.work_date].swipes += r.swipe_count || 0;
+            byDate[r.work_date].persons.add(r.employee_id);
+            byDate[r.work_date].stay   += r.stay_hours  || 0;
+        }
+        const d = Object.values(byDate)[0] || { swipes: 0, persons: new Set(), stay: 0 };
+        setModalContent(`
+            <div class="stats-grid">
+                <div class="stat-item"><div class="stat-item-value">${(d.swipes / orgSize).toFixed(2)}</div><div class="stat-item-label">平均刷卡次數（次）</div></div>
+                <div class="stat-item"><div class="stat-item-value">${d.persons.size}</div><div class="stat-item-label">出勤人數（人）</div></div>
+                <div class="stat-item"><div class="stat-item-value">${(d.stay / orgSize).toFixed(2)}</div><div class="stat-item-label">平均停留時數（hrs）</div></div>
+            </div>
+        `);
+
+    } else {
+        // ── Month/Quarter: call trend API for daily buckets ──────────
+        const periodLabel = period === 'quarter' ? '季' : '月';
+        try {
+            let url = `${getReportUrl()}/v1/reports/trend?period=day&as=${managerId}`;
+            if (startDate) url += `&start_date=${startDate}`;
+            if (endDate)   url += `&end_date=${endDate}`;
+
+            const response = await fetch(url, { headers: state.token ? { Authorization: `Bearer ${state.token}` } : {} });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || '趨勢查詢失敗');
+
+            const trends = (data.trends || []).sort((a, b) => a.bucket.localeCompare(b.bucket));
+            state.modalTrendData = { type: 'trend', trends, orgSize };
+
+            // Top cards: group by period then average
+            const byPeriod = {};
+            for (const t of trends) {
+                const key = period === 'month'
+                    ? t.bucket.substring(0, 7)
+                    : t.bucket.substring(0, 4) + '-Q' + Math.ceil(parseInt(t.bucket.substring(5, 7)) / 3);
+                if (!byPeriod[key]) byPeriod[key] = { swipes: [], persons: [], stay: [] };
+                byPeriod[key].swipes.push((t.total_swipes || 0) / orgSize);
+                byPeriod[key].persons.push(t.head_count || 0);
+                byPeriod[key].stay.push(t.avg_stay_hrs || 0);
+            }
+            const avg = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+            const pv = Object.values(byPeriod);
+            const np = pv.length || 1;
+            const pAvgSwipes  = (pv.reduce((s, p) => s + avg(p.swipes),   0) / np).toFixed(2);
+            const pAvgPersons = (pv.reduce((s, p) => s + avg(p.persons),  0) / np).toFixed(1);
+            const pAvgStay    = (pv.reduce((s, p) => s + avg(p.stay),     0) / np).toFixed(2);
+
+            setModalContent(`
+                <div class="stats-grid" style="margin-bottom:20px;">
+                    <div class="stat-item"><div class="stat-item-value">${pAvgSwipes}</div><div class="stat-item-label">${periodLabel}平均刷卡次數</div></div>
+                    <div class="stat-item"><div class="stat-item-value">${pAvgPersons}</div><div class="stat-item-label">${periodLabel}平均出勤人數</div></div>
+                    <div class="stat-item"><div class="stat-item-value">${pAvgStay}</div><div class="stat-item-label">${periodLabel}平均停留時數 (hrs)</div></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <label style="font-size:13px;color:var(--text-secondary);">${periodLabel}顯示指標</label>
+                    <select id="org-trend-metric" onchange="reRenderOrgChart()" style="background:var(--bg-hover);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;">
+                        <option value="avg_swipe">平均刷卡次數</option>
+                        <option value="persons">出勤人數</option>
+                        <option value="avg_stay">平均停留時數 (hrs)</option>
+                    </select>
+                </div>
+                <div class="chart-container" style="height:300px;"><canvas id="modal-org-chart"></canvas></div>
+            `);
+            requestAnimationFrame(() => reRenderOrgChart());
+        } catch (err) {
+            setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
+        }
+    }
+}
+
+function reRenderOrgChart() {
+    const td = state.modalTrendData;
+    if (!td) return;
+    const period = state.modalOrgPeriod || 'day';
+    const metric = document.getElementById('org-trend-metric')?.value || 'avg_swipe';
+
+    const metricCfg = {
+        avg_swipe: { label: '平均刷卡次數',      yTitle: '次數',       color: '#3b82f6' },
+        persons:   { label: '出勤人數',           yTitle: '人數 (人)',   color: '#10b981' },
+        avg_stay:  { label: '平均停留時數 (hrs)', yTitle: '時數 (hrs)', color: '#fbbf24' },
+    };
+    const cfg = metricCfg[metric] || metricCfg.avg_swipe;
+
+    if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
+    const ctx = document.getElementById('modal-org-chart');
+    if (!ctx) { console.warn('[reRenderOrgChart] canvas #modal-org-chart not found'); return; }
+
+    const chartBase = {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#f1f5f9' } } },
+        scales: {
+            x: { ticks: { color: '#f1f5f9', maxRotation: 45 }, grid: { color: 'rgba(71,85,105,0.2)' } },
+            y: { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }, title: { display: true, text: cfg.yTitle, color: '#94a3b8' } }
+        }
+    };
+
+    if (td.type === 'day') {
+        // Bar chart: one bar per employee (from lastReports)
+        // Day mode renders only stat cards — no chart needed
+        return;
+    } else {
+        // Line chart: x = date bucket, from trend API data
+        const { trends, orgSize } = td;
+        const labels = trends.map(t => t.bucket);
+        const data = trends.map(t => {
+            if (metric === 'avg_swipe') return parseFloat(((t.total_swipes || 0) / orgSize).toFixed(2));
+            if (metric === 'persons')   return t.head_count || 0;
+            return parseFloat((t.avg_stay_hrs || 0).toFixed(2));
+        });
+        state.modalChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets: [{ label: cfg.label, data, borderColor: cfg.color, backgroundColor: cfg.color + '22', tension: 0.4, fill: true, pointRadius: 3 }] },
+            options: chartBase
+        });
+    }
 }
 
 // ============ ALERTS ============
@@ -823,6 +1130,16 @@ function formatTime(timeString) {
     try {
         const date = new Date(timeString);
         return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+        return timeString;
+    }
+}
+
+function formatTimeDetailed(timeString) {
+    if (!timeString) return '-';
+    try {
+        const date = new Date(timeString);
+        return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {
         return timeString;
     }
