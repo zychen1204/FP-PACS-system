@@ -32,14 +32,11 @@ const state = {
 
 // Helper Functions
 function getRoleBadge(report) {
-    const status = report.status || (report.job_level) || (report.is_manager ? 'MANAGER_L2' : 'STAFF');
+    const status = report.status || 'STAFF';
     const roles = {
         'MANAGER_L1': { label: '🎖️ 一級主管', class: 'mgr-1' },
         'MANAGER_L2': { label: '👔 二級主管', class: 'mgr-2' },
-        'mgr-1': { label: '🎖️ 一級主管', class: 'mgr-1' },
-        'mgr-2': { label: '👔 二級主管', class: 'mgr-2' },
-        'STAFF': { label: '👤 員工', class: 'employee' },
-        'employee': { label: '👤 員工', class: 'employee' }
+        'STAFF':      { label: '👤 員工',      class: 'employee' }
     };
     const role = roles[status] || roles['STAFF'];
     return `<span class="badge-role ${role.class}">${role.label}</span>`;
@@ -261,91 +258,6 @@ function displaySwipeResponse(status, data, payload) {
 
 
 
-// ============ REPORT FETCHING ============
-async function fetchReport() {
-    try {
-        const response = await fetch(`${getReportUrl()}/v1/reports/attendance`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to fetch report');
-        }
-
-        displayReport(data);
-
-    } catch (error) {
-        displayReportError(error.message);
-    }
-}
-
-// ============ REPORT DISPLAY ============
-function displayReport(reports) {
-    const responseBox = document.getElementById('report-response');
-    const tbody = document.getElementById('report-tbody');
-    const statsBox = document.getElementById('report-stats');
-
-    responseBox.classList.remove('hidden', 'error');
-    responseBox.classList.add('success');
-
-    if (!reports || reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty">沒有找到出席紀錄</td></tr>';
-        statsBox.innerHTML = '<div class="stat-item"><div class="stat-item-value">0</div><div class="stat-item-label">總紀錄數</div></div>';
-        return;
-    }
-
-    const totalRecords = reports.length;
-    const totalSwipes = reports.reduce((sum, r) => sum + r.swipe_count, 0);
-    const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
-
-    statsBox.innerHTML = `
-        <div class="stat-item">
-            <div class="stat-item-value">${totalRecords}</div>
-            <div class="stat-item-label">總紀錄數</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-item-value">${uniqueEmployees}</div>
-            <div class="stat-item-label">員工人數</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-item-value">${totalSwipes}</div>
-            <div class="stat-item-label">總刷卡次數</div>
-        </div>
-    `;
-
-    tbody.innerHTML = reports.map(report => `
-        <tr>
-            <td>${report.employee_id}</td>
-            <td>${report.name || '-'}</td>
-            <td>${report.org_path || '-'}</td>
-            <td>${report.work_date || '-'}</td>
-            <td>${formatTime(report.first_in)}</td>
-            <td>${formatTime(report.last_out)}</td>
-            <td><strong>${report.swipe_count}</strong></td>
-            <td>${report.stay_hours ? report.stay_hours.toFixed(1) + ' hr' : '-'}</td>
-        </tr>
-    `).join('');
-
-    responseBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function displayReportError(message) {
-    const responseBox = document.getElementById('report-response');
-    const tbody = document.getElementById('report-tbody');
-    const statsBox = document.getElementById('report-stats');
-
-    responseBox.classList.remove('hidden', 'success');
-    responseBox.classList.add('error');
-
-    statsBox.innerHTML = `<div style="color: var(--danger); padding: 15px;">❌ 錯誤: ${message}</div>`;
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">無法載入報表</td></tr>';
-
-    responseBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
 // ============ SETTINGS ============
 function saveSettings() {
     const apiUrl = document.getElementById('api-url').value.trim();
@@ -373,9 +285,9 @@ async function testServerConnection() {
     connectionResult.classList.remove('hidden', 'success', 'error');
 
     try {
-        const accessTest = await fetch(`${getApiUrl()}/api/healthz`, { method: 'GET' })
+        const accessTest = await fetch(`${getApiUrl()}/healthz`, { method: 'GET' })
             .then(r => r.ok).catch(() => false);
-        const reportTest = await fetch(`${getReportUrl()}/api/report-healthz`, { method: 'GET' })
+        const reportTest = await fetch(`${getReportUrl()}/healthz`, { method: 'GET' })
             .then(r => r.ok).catch(() => false);
 
         const accessStatus = accessTest ? '✓ 連線成功' : '✗ 無法連接';
@@ -465,25 +377,6 @@ function getPeriodDateRange() {
 }
 
 // ============ ATTENDANCE REPORT ============
-function aggregateByEmployee(reports, period) {
-    const map = {};
-    for (const r of reports) {
-        const id = r.employee_id;
-        if (!map[id]) {
-            map[id] = { employee_id: id, name: r.name, status: r.status, org_path: r.org_path,
-                        total_swipes: 0, total_stay_hours: 0, day_count: 0 };
-        }
-        map[id].total_swipes += r.swipe_count || 0;
-        map[id].total_stay_hours += r.stay_hours || 0;
-        map[id].day_count += 1;
-    }
-    return Object.values(map).map(e => ({
-        ...e,
-        avg_swipes: e.day_count > 0 ? e.total_swipes / e.day_count : 0,
-        avg_stay_hours: e.day_count > 0 ? e.total_stay_hours / e.day_count : 0
-    }));
-}
-
 async function fetchAttendance() {
     const employeeId = document.getElementById('attendance-employee-id')?.value?.trim();
     const mode = document.querySelector('input[name="attendance-mode"]:checked')?.value || 'self';
@@ -500,11 +393,14 @@ async function fetchAttendance() {
         return;
     }
 
+    const isAggregated = (period === 'month' || period === 'quarter');
+
     try {
         if (mode === 'org') {
-            // For month/quarter, fetch all (no date) then filter client-side
-            let url = `${getReportUrl()}/v1/reports/manager-team?as=${employeeId}`;
-            if (period === 'day' && startDate) url += `&date=${startDate}`;
+            const endpoint = isAggregated ? 'manager-team/aggregated' : 'manager-team';
+            let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
+            if (startDate) url += `&start_date=${startDate}`;
+            if (endDate)   url += `&end_date=${endDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
@@ -512,28 +408,24 @@ async function fetchAttendance() {
             if (response.status === 403) throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
             if (!response.ok) throw new Error(data.error || '查詢失敗');
 
-            let reports = data.reports || [];
-            if (period !== 'day' && startDate && endDate) {
-                reports = reports.filter(r => r.work_date >= startDate && r.work_date <= endDate);
-            }
+            const reports = isAggregated ? (data.aggregates || []) : (data.reports || []);
             state.currentOrgScope = data.manager_scope;
             state.lastReports = reports;
             displayAttendanceReport(reports, data.manager_scope, mode, period);
         } else {
-            let url = `${getReportUrl()}/v1/reports/attendance?as=${state.currentBadge}`;
-            if (period === 'day' && startDate) url += `&date=${startDate}`;
+            const endpoint = isAggregated ? 'attendance/aggregated' : 'attendance';
+            let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
+            if (startDate) url += `&start_date=${startDate}`;
+            if (endDate)   url += `&end_date=${endDate}`;
 
             const response = await fetch(url);
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || '查詢失敗');
 
-            let filtered = data.filter(r => r.employee_id === employeeId);
-            if (period !== 'day' && startDate && endDate) {
-                filtered = filtered.filter(r => r.work_date >= startDate && r.work_date <= endDate);
-            }
+            const reports = Array.isArray(data) ? data : [];
             state.currentOrgScope = null;
-            state.lastReports = filtered;
-            displayAttendanceReport(filtered, null, mode, period);
+            state.lastReports = reports;
+            displayAttendanceReport(reports, null, mode, period);
         }
     } catch (error) {
         displayAttendanceError(error.message);
@@ -599,11 +491,14 @@ function displayAttendanceReport(reports, scope, mode, period) {
         return;
     }
 
-    // Stats
+    // Stats — day mode uses swipe_count/stay_hours; aggregated uses total_swipes/total_stay_hours
     const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : '';
-    const uniqueEmployees = new Set(reports.map(r => r.employee_id)).size;
-    const totalSwipes = reports.reduce((sum, r) => sum + (r.swipe_count || 0), 0);
-    const totalStayHours = reports.reduce((sum, r) => sum + (r.stay_hours || 0), 0).toFixed(1);
+    const isAggregated = (period === 'month' || period === 'quarter');
+    const uniqueEmployees = isAggregated
+        ? reports.length
+        : new Set(reports.map(r => r.employee_id)).size;
+    const totalSwipes = reports.reduce((sum, r) => sum + (isAggregated ? (r.total_swipes || 0) : (r.swipe_count || 0)), 0);
+    const totalStayHours = reports.reduce((sum, r) => sum + (isAggregated ? (r.total_stay_hours || 0) : (r.stay_hours || 0)), 0).toFixed(1);
 
     if (mode === 'org') {
         statsContainer.innerHTML = `
@@ -636,19 +531,18 @@ function displayAttendanceReport(reports, scope, mode, period) {
             </tr>`;
         }).join('');
     } else {
-        const aggregated = aggregateByEmployee(reports, period);
-        tbody.innerHTML = aggregated.map(e => {
+        tbody.innerHTML = reports.map(e => {
             const identity = getRoleBadge(e);
             if (mode === 'self') {
                 return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
                     <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
-                    <td>${e.avg_swipes.toFixed(1)}</td><td>${e.avg_stay_hours.toFixed(1)} hr</td>
+                    <td>${(e.avg_swipes || 0).toFixed(1)}</td><td>${(e.avg_stay_hours || 0).toFixed(1)} hr</td>
                 </tr>`;
             }
             return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
                 <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
-                <td><strong>${e.total_swipes}</strong></td><td>${e.avg_swipes.toFixed(1)}</td>
-                <td>${e.total_stay_hours.toFixed(1)} hr</td><td>${e.avg_stay_hours.toFixed(1)} hr</td>
+                <td><strong>${e.total_swipes || 0}</strong></td><td>${(e.avg_swipes || 0).toFixed(1)}</td>
+                <td>${(e.total_stay_hours || 0).toFixed(1)} hr</td><td>${(e.avg_stay_hours || 0).toFixed(1)} hr</td>
             </tr>`;
         }).join('');
     }
@@ -812,18 +706,8 @@ async function showDayAuditModal(employeeId, name, date) {
 function showPersonalTrendModal(employeeId, name) {
     openModal(`📈 ${name}（${employeeId}）出勤趨勢`);
 
-    const dailyData = (state.lastReports || [])
-        .filter(r => r.employee_id === employeeId)
-        .sort((a, b) => a.work_date.localeCompare(b.work_date));
-
-    if (!dailyData.length) {
-        setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
-        return;
-    }
-
-    state.modalPersonalData = dailyData;
-
-    setModalContent(`
+    const { period, startDate, endDate } = getPeriodDateRange();
+    const chartHtml = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
             <label style="font-size:13px;color:var(--text-secondary);">顯示指標</label>
             <select id="personal-trend-metric" onchange="reRenderPersonalChart()" style="background:var(--bg-hover);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;">
@@ -832,9 +716,41 @@ function showPersonalTrendModal(employeeId, name) {
             </select>
         </div>
         <div class="chart-container" style="height:320px;"><canvas id="modal-personal-chart"></canvas></div>
-    `);
+    `;
 
-    requestAnimationFrame(() => reRenderPersonalChart());
+    if (period === 'day') {
+        // Day mode: reuse cached daily rows from last query
+        const dailyData = (state.lastReports || [])
+            .filter(r => r.employee_id === employeeId)
+            .sort((a, b) => a.work_date.localeCompare(b.work_date));
+        if (!dailyData.length) {
+            setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
+            return;
+        }
+        state.modalPersonalData = dailyData;
+        setModalContent(chartHtml);
+        requestAnimationFrame(() => reRenderPersonalChart());
+    } else {
+        // Month/quarter mode: fetch fresh per-day data from attendance endpoint
+        const url = `${getReportUrl()}/v1/reports/attendance?as=${employeeId}&start_date=${startDate}&end_date=${endDate}`;
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const dailyData = (Array.isArray(data) ? data : [])
+                    .filter(r => r.employee_id === employeeId)
+                    .sort((a, b) => a.work_date.localeCompare(b.work_date));
+                if (!dailyData.length) {
+                    setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
+                    return;
+                }
+                state.modalPersonalData = dailyData;
+                setModalContent(chartHtml);
+                requestAnimationFrame(() => reRenderPersonalChart());
+            })
+            .catch(err => {
+                setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
+            });
+    }
 }
 
 function reRenderPersonalChart() {
@@ -918,25 +834,12 @@ async function showOrgTrend() {
             if (!response.ok) throw new Error(data.error || '趨勢查詢失敗');
 
             const trends = (data.trends || []).sort((a, b) => a.bucket.localeCompare(b.bucket));
-            state.modalTrendData = { type: 'trend', trends, orgSize };
+            const summary = data.summary || {};
+            state.modalTrendData = { type: 'trend', trends };
 
-            // Top cards: group by period then average
-            const byPeriod = {};
-            for (const t of trends) {
-                const key = period === 'month'
-                    ? t.bucket.substring(0, 7)
-                    : t.bucket.substring(0, 4) + '-Q' + Math.ceil(parseInt(t.bucket.substring(5, 7)) / 3);
-                if (!byPeriod[key]) byPeriod[key] = { swipes: [], persons: [], stay: [] };
-                byPeriod[key].swipes.push((t.total_swipes || 0) / orgSize);
-                byPeriod[key].persons.push(t.head_count || 0);
-                byPeriod[key].stay.push(t.avg_stay_hrs || 0);
-            }
-            const avg = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
-            const pv = Object.values(byPeriod);
-            const np = pv.length || 1;
-            const pAvgSwipes  = (pv.reduce((s, p) => s + avg(p.swipes),   0) / np).toFixed(2);
-            const pAvgPersons = (pv.reduce((s, p) => s + avg(p.persons),  0) / np).toFixed(1);
-            const pAvgStay    = (pv.reduce((s, p) => s + avg(p.stay),     0) / np).toFixed(2);
+            const pAvgSwipes  = (summary.avg_swipes_per_person || 0).toFixed(2);
+            const pAvgPersons = (summary.avg_head_count || 0).toFixed(1);
+            const pAvgStay    = (summary.avg_stay_hrs || 0).toFixed(2);
 
             setModalContent(`
                 <div class="stats-grid" style="margin-bottom:20px;">
@@ -993,10 +896,10 @@ function reRenderOrgChart() {
         return;
     } else {
         // Line chart: x = date bucket, from trend API data
-        const { trends, orgSize } = td;
+        const { trends } = td;
         const labels = trends.map(t => t.bucket);
         const data = trends.map(t => {
-            if (metric === 'avg_swipe') return parseFloat(((t.total_swipes || 0) / orgSize).toFixed(2));
+            if (metric === 'avg_swipe') return t.head_count > 0 ? parseFloat(((t.total_swipes || 0) / t.head_count).toFixed(2)) : 0;
             if (metric === 'persons')   return t.head_count || 0;
             return parseFloat((t.avg_stay_hrs || 0).toFixed(2));
         });
@@ -1090,38 +993,30 @@ async function devLogin() {
         
         state.token = data.access_token;
         state.currentBadge = badge;
-        
+
         localStorage.setItem('pacs_token', data.access_token);
         localStorage.setItem('current_badge', badge);
-        
+
         const tokenInfo = document.getElementById('token-info');
-        const roleText = data.is_manager ? "👔 主管" : "👤 員工";
-        
         if (tokenInfo) {
             tokenInfo.innerHTML = `
                 <strong>✓ 登入成功</strong><br>
-                員工: ${badge} (${roleText})<br>
+                員工: ${badge}<br>
                 Token: ${data.access_token.substring(0, 50)}...<br>
                 有效期: ${Math.floor(data.expires_in / 3600)} 小時
             `;
         }
-        
-        updateProfileDisplay(badge, data.is_manager);
+
+        updateProfileDisplay(badge);
         
     } catch (error) {
         alert('登入失敗: ' + error.message);
     }
 }
 
-function updateProfileDisplay(badge, isManager = false) {
+function updateProfileDisplay(badge) {
     const profileName = document.getElementById('profile-name');
-    const profileStatus = document.getElementById('profile-status');
-    if (profileName) {
-        profileName.textContent = badge;
-    }
-    if (profileStatus && badge !== '訪客') {
-        profileStatus.innerHTML = isManager ? '<span style="color:var(--primary)">👔 主管</span>' : '<span style="color:var(--text-secondary)">👤 員工</span>';
-    }
+    if (profileName) profileName.textContent = badge;
 }
 
 // ============ UTILITIES ============
@@ -1167,7 +1062,7 @@ window.addEventListener('load', () => {
 
 // Periodically test connection every 30 seconds
 setInterval(() => {
-    fetch(`${getApiUrl()}/api/healthz`, { method: 'GET' })
+    fetch(`${getApiUrl()}/healthz`, { method: 'GET' })
         .then(r => updateServerStatus(r.ok))
         .catch(() => updateServerStatus(false));
 }, 30000);

@@ -9,11 +9,12 @@ import (
 // Reporter is the DB interface used by all reporting-api handlers.
 // The real implementation is *db.PostgresDB; tests inject a mockDB.
 type Reporter interface {
-	QueryAttendance(ctx context.Context, date string) ([]models.AttendanceReport, error)
+	QueryAttendance(ctx context.Context, badgeID, startDate, endDate string) ([]models.AttendanceReport, error)
 	QueryAuditTrail(ctx context.Context, badgeID, startDate, endDate string) ([]models.AccessEvent, error)
 	GetManagerScope(ctx context.Context, badgeID string) (string, error)
-	QueryManagerTeamAttendance(ctx context.Context, scopeLtree, date string) ([]models.AttendanceReport, error)
+	QueryManagerTeamAttendance(ctx context.Context, scopeLtree, startDate, endDate string) ([]models.AttendanceReport, error)
+	QueryEmployeeAggregated(ctx context.Context, badgeID, scopeLtree, startDate, endDate string) ([]models.EmployeeAggregate, error)
 	QueryAttendanceTrend(ctx context.Context, period, scope, startDate, endDate string) ([]models.AttendanceTrend, error)
-	QueryAlerts(ctx context.Context, openOnly bool, limit int) ([]models.Alert, error)
+	QueryAlerts(ctx context.Context, openOnly bool, severity string, limit int) ([]models.Alert, error)
 	Close() error
 }

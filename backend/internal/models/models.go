@@ -34,7 +34,7 @@ type AccessEvent struct {
 type AttendanceReport struct {
 	EmployeeID string     `json:"employee_id"`
 	Name       string     `json:"name"`
-	Status     string     `json:"status"` // "mgr-1", "mgr-2", or "employee"
+	Status     string     `json:"status"` // "MANAGER_L1", "MANAGER_L2", or "STAFF"
 	OrgPath    string     `json:"org_path"`
 	WorkDate   string     `json:"work_date"`
 	FirstIn    *time.Time `json:"first_in,omitempty"`
@@ -50,6 +50,28 @@ type AttendanceTrend struct {
 	HeadCount   int     `json:"head_count"`   // distinct badges in bucket
 	AvgStayHrs  float64 `json:"avg_stay_hrs"` // average stay_hours across badges
 	TotalSwipes int     `json:"total_swipes"` // sum of swipe_count
+}
+
+// EmployeeAggregate is per-employee aggregated attendance over a date range (month/quarter).
+// Returned by the /v1/reports/attendance/aggregated and /v1/reports/manager-team/aggregated endpoints.
+type EmployeeAggregate struct {
+	EmployeeID     string  `json:"employee_id"`
+	Name           string  `json:"name"`
+	Status         string  `json:"status"`
+	OrgPath        string  `json:"org_path"`
+	TotalSwipes    int     `json:"total_swipes"`
+	TotalStayHours float64 `json:"total_stay_hours"`
+	DayCount       int     `json:"day_count"`
+	AvgSwipes      float64 `json:"avg_swipes"`
+	AvgStayHours   float64 `json:"avg_stay_hours"`
+}
+
+// TrendSummary holds period-level averages derived from AttendanceTrend buckets.
+// Returned alongside trends so the frontend does not need to re-aggregate.
+type TrendSummary struct {
+	AvgSwipesPerPerson float64 `json:"avg_swipes_per_person"`
+	AvgHeadCount       float64 `json:"avg_head_count"`
+	AvgStayHrs         float64 `json:"avg_stay_hrs"`
 }
 
 // Alert is FR-11 anomaly record.

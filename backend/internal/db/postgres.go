@@ -71,10 +71,10 @@ func (p *PostgresDB) InsertEvent(ctx context.Context, event models.AccessEvent) 
 	return err
 }
 
-// QueryAttendance returns attendance reports, optionally filtered by date.
-// 改 event_time::date → event_date 後直接命中 idx_events_status_date partial index
-// (event_date, badge_id) WHERE status='SUCCESS'，並修掉原 GROUP BY 與 SELECT 對齊。
-func (p *PostgresDB) QueryAttendance(ctx context.Context, date string) ([]models.AttendanceReport, error) {
+// QueryAttendance returns attendance reports filtered by badge and/or date range.
+// badgeID="" returns all badges; startDate/endDate="" skips that bound.
+// Hits idx_events_status_date partial index (event_date, badge_id WHERE status='SUCCESS').
+func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, endDate string) ([]models.AttendanceReport, error) {
 	query := `
 		SELECT
 			e.badge_id,
@@ -84,20 +84,28 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, date string) ([]models
 			MIN(CASE WHEN e.direction = 'IN'  THEN e.event_time END) AS first_in,
 			MAX(CASE WHEN e.direction = 'OUT' THEN e.event_time END) AS last_out,
 			COUNT(*)                                      AS swipe_count,
-			CASE COALESCE(emp.job_level, 'STAFF')
-			    WHEN 'MANAGER_L1' THEN 'mgr-1'
-			    WHEN 'MANAGER_L2' THEN 'mgr-2'
-			    ELSE 'employee'
-			END AS status
+			COALESCE(emp.job_level, 'STAFF')              AS status
 		FROM access_events e
 		LEFT JOIN employees emp ON e.badge_id = emp.badge_id
 		WHERE e.status = 'SUCCESS'
 	`
 	args := []interface{}{}
+	idx := 1
 
-	if date != "" {
-		query += " AND e.event_date = $1"
-		args = append(args, date)
+	if badgeID != "" {
+		query += fmt.Sprintf(" AND e.badge_id = $%d", idx)
+		args = append(args, badgeID)
+		idx++
+	}
+	if startDate != "" {
+		query += fmt.Sprintf(" AND e.event_date >= $%d", idx)
+		args = append(args, startDate)
+		idx++
+	}
+	if endDate != "" {
+		query += fmt.Sprintf(" AND e.event_date <= $%d", idx)
+		args = append(args, endDate)
+		idx++
 	}
 
 	query += `
@@ -169,26 +177,30 @@ func (p *PostgresDB) GetManagerScope(ctx context.Context, badgeID string) (strin
 
 // QueryManagerTeamAttendance returns attendance for all employees under the given ltree scope.
 // FR-6 / FR-9 pattern a step 2：用 ltree `<@` (descendant of) operator + GiST index 查子樹。
-// 若 date 為空，回 mv_daily_attendance 上所有日期；否則 filter event_date。
-func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree, date string) ([]models.AttendanceReport, error) {
+// startDate/endDate filter event_date server-side; both empty = all dates.
+func (p *PostgresDB) QueryManagerTeamAttendance(ctx context.Context, scopeLtree, startDate, endDate string) ([]models.AttendanceReport, error) {
 	query := `
 		SELECT mv.badge_id, mv.name, mv.org_path,
 		       mv.event_date::text AS work_date,
 		       mv.first_in, mv.last_out, mv.swipe_count,
 		       COALESCE(mv.stay_hours, 0)::float8 AS stay_hours,
-		       CASE COALESCE(emp.job_level, 'STAFF')
-		           WHEN 'MANAGER_L1' THEN 'mgr-1'
-		           WHEN 'MANAGER_L2' THEN 'mgr-2'
-		           ELSE 'employee'
-		       END AS status
+		       COALESCE(emp.job_level, 'STAFF')              AS status
 		FROM mv_daily_attendance mv
 		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
 		WHERE mv.org_path_ltree <@ $1::ltree
 	`
 	args := []interface{}{scopeLtree}
-	if date != "" {
-		query += " AND mv.event_date = $2"
-		args = append(args, date)
+	idx := 2
+
+	if startDate != "" {
+		query += fmt.Sprintf(" AND mv.event_date >= $%d", idx)
+		args = append(args, startDate)
+		idx++
+	}
+	if endDate != "" {
+		query += fmt.Sprintf(" AND mv.event_date <= $%d", idx)
+		args = append(args, endDate)
+		idx++
 	}
 	query += " ORDER BY mv.event_date DESC, mv.badge_id"
 
@@ -267,9 +279,69 @@ func (p *PostgresDB) QueryAttendanceTrend(ctx context.Context, period, scope, st
 	return trends, nil
 }
 
+// QueryEmployeeAggregated returns per-employee aggregated attendance for a date range.
+// Reads from mv_daily_attendance; filters by badge (self mode) or org scope (manager mode).
+func (p *PostgresDB) QueryEmployeeAggregated(ctx context.Context, badgeID, scopeLtree, startDate, endDate string) ([]models.EmployeeAggregate, error) {
+	query := `
+		SELECT mv.badge_id,
+		       COALESCE(mv.name, 'Employee ' || mv.badge_id) AS name,
+		       COALESCE(mv.org_path, 'Unknown')              AS org_path,
+		       COALESCE(emp.job_level, 'STAFF')              AS status,
+		       SUM(mv.swipe_count)::int                      AS total_swipes,
+		       SUM(COALESCE(mv.stay_hours, 0))::float8       AS total_stay_hours,
+		       COUNT(*)::int                                  AS day_count,
+		       (SUM(mv.swipe_count)::float8 / NULLIF(COUNT(*), 0))::float8           AS avg_swipes,
+		       (SUM(COALESCE(mv.stay_hours, 0)) / NULLIF(COUNT(*), 0))::float8       AS avg_stay_hours
+		FROM mv_daily_attendance mv
+		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
+		WHERE 1 = 1
+	`
+	args := []interface{}{}
+	idx := 1
+
+	if badgeID != "" {
+		query += fmt.Sprintf(" AND mv.badge_id = $%d", idx)
+		args = append(args, badgeID)
+		idx++
+	}
+	if scopeLtree != "" {
+		query += fmt.Sprintf(" AND mv.org_path_ltree <@ $%d::ltree", idx)
+		args = append(args, scopeLtree)
+		idx++
+	}
+	if startDate != "" {
+		query += fmt.Sprintf(" AND mv.event_date >= $%d", idx)
+		args = append(args, startDate)
+		idx++
+	}
+	if endDate != "" {
+		query += fmt.Sprintf(" AND mv.event_date <= $%d", idx)
+		args = append(args, endDate)
+		idx++
+	}
+	query += " GROUP BY mv.badge_id, mv.name, mv.org_path, emp.job_level ORDER BY mv.badge_id"
+
+	rows, err := p.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var aggs []models.EmployeeAggregate
+	for rows.Next() {
+		var a models.EmployeeAggregate
+		if err := rows.Scan(&a.EmployeeID, &a.Name, &a.OrgPath, &a.Status,
+			&a.TotalSwipes, &a.TotalStayHours, &a.DayCount, &a.AvgSwipes, &a.AvgStayHours); err != nil {
+			return nil, err
+		}
+		aggs = append(aggs, a)
+	}
+	return aggs, nil
+}
+
 // QueryAlerts returns alerts; if openOnly is true filter resolved_at IS NULL.
-// FR-11 read side。
-func (p *PostgresDB) QueryAlerts(ctx context.Context, openOnly bool, limit int) ([]models.Alert, error) {
+// severity="" means all severities. FR-11 read side.
+func (p *PostgresDB) QueryAlerts(ctx context.Context, openOnly bool, severity string, limit int) ([]models.Alert, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -277,13 +349,23 @@ func (p *PostgresDB) QueryAlerts(ctx context.Context, openOnly bool, limit int) 
 		SELECT id, alert_type, severity, badge_id, site_id, gate_id,
 		       details::text, occurred_at, resolved_at
 		FROM alerts
+		WHERE 1 = 1
 	`
-	if openOnly {
-		query += " WHERE resolved_at IS NULL"
-	}
-	query += " ORDER BY occurred_at DESC LIMIT $1"
+	args := []interface{}{}
+	idx := 1
 
-	rows, err := p.db.QueryContext(ctx, query, limit)
+	if openOnly {
+		query += " AND resolved_at IS NULL"
+	}
+	if severity != "" {
+		query += fmt.Sprintf(" AND severity = $%d", idx)
+		args = append(args, severity)
+		idx++
+	}
+	query += fmt.Sprintf(" ORDER BY occurred_at DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := p.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
