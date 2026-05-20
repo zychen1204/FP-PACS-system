@@ -8,6 +8,7 @@
 |---|---|
 | [實作與修復待辦事項](TodoList.md) | 列出後續預計實作的重點功能與修復項目（包含前、後端與資料庫）。 |
 | [資料模擬與測試指南](SimulationGuide.md) | 關於 1000 人大規模員工與刷卡紀錄模擬、壓力測試的詳細指引。 |
+| [Docker 與 Kubernetes 部署、播種、壓測](DockerK8sDeployment.md) | Docker build、GKE 部署、Cloud SQL seed Job 與 load-test Job 操作。 |
 
 ## 歷史文件 (History)
 

@@ -43,9 +43,9 @@ sleep 25  # 等待 migrate 與各服務就緒
 ### 🌟 開發重點
 - **待辦清單**: 👉 [待辦事項](docs/TodoList.md)
 - **資料模擬**: 👉 [模擬指南](docs/SimulationGuide.md)
+- **Docker/K8s 部署、播種、壓測**: 👉 [部署指南](docs/DockerK8sDeployment.md)
 
 ## 🧪 測試與驗證
 
 本系統提供豐富的單元與端到端 (E2E) 測試機制。
 👉 **[測試詳細](docs/TestingGuide.md)**
-

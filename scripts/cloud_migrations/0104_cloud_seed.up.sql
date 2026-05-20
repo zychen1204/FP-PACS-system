@@ -31,6 +31,20 @@
 --   0103_seed_local.up.sql  (1,000 人，自動執行)
 -- ============================================================
 
+-- ── Phase 0: 將舊 demo/local seed 員工排除在 active cloud dataset 外 ─────
+-- Cloud 壓測資料集必須剛好是 B-000001 ~ B-090000 共 90,000 名 active
+-- employees。migrate 仍會先建立少量 demo users（例如 B001/B100），若不先
+-- 停用，最後驗證會因 active 總數大於 90,000 而失敗。
+UPDATE employees
+SET is_active = FALSE,
+    updated_at = NOW()
+WHERE is_active
+  AND (
+      badge_id !~ '^B-[0-9]{6}$'
+      OR badge_id < 'B-000001'
+      OR badge_id > 'B-090000'
+  );
+
 -- ── Phase 1: 廠長 L1 ────────────────────────────────────────
 INSERT INTO employees (badge_id, name, job_level, org_path, org_path_ltree, is_active)
 VALUES (

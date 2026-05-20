@@ -39,6 +39,7 @@ func printHelp() {
 ║             local 建議 0.5（避免本地過載）                    ║
 ║   --api    URL           Access API（預設 localhost:8080）    ║
 ║   --report URL           Report API（預設 localhost:8081）    ║
+║   --sql-output PATH      輸出 SQL 檔（預設 seed_history...）   ║
 ║   --dry-run              只生成事件，不實際送出（顯示統計）   ║
 ║                                                               ║
 ║ 範例:                                                         ║
@@ -62,6 +63,7 @@ type Config struct {
 	QPSScale  float64 // QPS 縮放係數
 	AccessAPI string  // Access API URL
 	ReportAPI string  // Reporting API URL
+	SQLOutput string  // 產出的 SQL 檔案路徑
 	DryRun    bool    // 只生成不送出
 	Clear     bool    // 是否在匯入前清空舊資料
 	Employees int     // 員工總數（由 Mode 決定）
@@ -76,6 +78,7 @@ func parseArgs() Config {
 		QPSScale:  1.0,
 		AccessAPI: "http://localhost:8080",
 		ReportAPI: "http://localhost:8081",
+		SQLOutput: "seed_history_events.sql",
 		DryRun:    false,
 	}
 
@@ -116,6 +119,11 @@ func parseArgs() Config {
 		case "--report":
 			if i+1 < len(args) {
 				cfg.ReportAPI = args[i+1]
+				i++
+			}
+		case "--sql-output":
+			if i+1 < len(args) {
+				cfg.SQLOutput = args[i+1]
 				i++
 			}
 		case "--dry-run":
@@ -175,6 +183,7 @@ func main() {
 ║  Workers  : %-51s║
 ║  QPS縮放  : %-51s║
 ║  Access   : %-51s║
+║  SQL      : %-51s║
 ║  Dry-Run  : %-51s║
 ╚═══════════════════════════════════════════════════════════════╝
 `,
@@ -184,6 +193,7 @@ func main() {
 		fmt.Sprintf("%d goroutines", cfg.Workers),
 		fmt.Sprintf("%.2fx", cfg.QPSScale),
 		cfg.AccessAPI,
+		cfg.SQLOutput,
 		fmt.Sprintf("%v", cfg.DryRun),
 	)
 

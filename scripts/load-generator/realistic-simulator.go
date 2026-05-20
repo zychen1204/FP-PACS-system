@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -70,9 +71,12 @@ func RunMonthlySimulation(cfg Config, startDate time.Time) {
 	fmt.Printf("✅ 生成完畢：總事件 %d 筆\n", len(events))
 
 	// 生成 SQL 種子檔以保留時間戳（解決進入/離開時間一樣的問題）
-	sqlFile := "seed_history_events.sql"
+	sqlFile := cfg.SQLOutput
 	fmt.Printf("💾 Phase 2: 正在產出 SQL 種子檔 (%s)...\n", sqlFile)
-	generateSQLFile(events, sqlFile, cfg)
+	if err := generateSQLFile(events, sqlFile, cfg); err != nil {
+		fmt.Printf("❌ SQL 產出失敗: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Println("✅ SQL 產出成功！請執行以下命令匯入以保留真實時間戳：")
 	fmt.Println("   docker-compose exec -T postgres psql -U pacs_user -d pacs_db < " + sqlFile)
 
@@ -174,17 +178,25 @@ func newEvent(badgeID, dir string, t time.Time, anomaly bool) SwipeEvent {
 	return SwipeEvent{BadgeID: badgeID, Direction: dir, EventTime: t, IsAnomaly: anomaly, SiteID: sites[rand.Intn(len(sites))], GateID: gatesByType[gt][rand.Intn(len(gatesByType[gt]))]}
 }
 
-func generateSQLFile(events []SwipeEvent, filename string, cfg Config) {
-	f, _ := os.Create(filename)
+func generateSQLFile(events []SwipeEvent, filename string, cfg Config) error {
+	if dir := filepath.Dir(filename); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 
-	fmt.Fprintln(f, "SET session_replication_role = 'replica';")
 	if cfg.Clear {
+		fmt.Fprintln(f, "SET session_replication_role = 'replica';")
 		fmt.Fprintln(f, "TRUNCATE TABLE access_events CASCADE;")
 		fmt.Fprintln(f, "TRUNCATE TABLE employees CASCADE;")
 		generateEmployeeSeedsSQL(f, cfg)
 	} else {
-		fmt.Fprintln(f, "DELETE FROM access_events WHERE reason = '[STRESS_TEST]';")
+		fmt.Fprintln(f, "-- access_events is append-only; stress-test rows are appended with reason='[STRESS_TEST]'.")
 	}
 
 	batchSize := 1000
@@ -210,8 +222,11 @@ func generateSQLFile(events []SwipeEvent, filename string, cfg Config) {
 				e.BadgeID, e.SiteID, e.GateID, e.Direction, status, reason, e.EventTime.Format(time.RFC3339), e.EventTime.Format("2006-01-02"), sep)
 		}
 	}
-	fmt.Fprintln(f, "SET session_replication_role = 'origin';")
+	if cfg.Clear {
+		fmt.Fprintln(f, "SET session_replication_role = 'origin';")
+	}
 	fmt.Fprintln(f, "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_attendance;")
+	return nil
 }
 
 func replayEvents(events []SwipeEvent, cfg Config) {
@@ -304,7 +319,7 @@ func gaussianMinutes(mean, stddev int) int {
 }
 
 func generateEmployeeSeedsSQL(f *os.File, cfg Config) {
-	fmt.Fprintln(f, "-- ── 自動播種 1000 位員工 ──")
+	fmt.Fprintf(f, "-- ── 自動播種 %d 位員工 ──\n", cfg.Employees)
 	fmt.Fprintln(f, "INSERT INTO employees (badge_id, name, job_level, org_path, org_path_ltree, is_active) VALUES")
 	// 廠長
 	fmt.Fprintln(f, "('B-000001', '廠長_總管', 'MANAGER_L1', 'TSMC', 'TSMC', TRUE),")
@@ -313,13 +328,26 @@ func generateEmployeeSeedsSQL(f *os.File, cfg Config) {
 		badgeID := fmt.Sprintf("B-%06d", i)
 		name := ""
 		level := "STAFF"
-		org := fmt.Sprintf("TSMC.製造部_%02d", (i-12)%10+1)
-		if i <= cfg.Managers {
-			level = "MANAGER_L2"
-			name = fmt.Sprintf("部經理_%02d", i-1)
-			org = fmt.Sprintf("TSMC.製造部_%02d", i-1)
+		org := ""
+		if cfg.Mode == "cloud" {
+			dept := ((i - cfg.Managers - 1) % 150) + 2
+			org = fmt.Sprintf("TSMC.部%03d.E_%06d", dept, i)
+			if i <= cfg.Managers {
+				level = "MANAGER_L2"
+				name = fmt.Sprintf("部經理_%03d", i)
+				org = fmt.Sprintf("TSMC.部%03d", i)
+			} else {
+				name = fmt.Sprintf("員工_%06d", i)
+			}
 		} else {
-			name = fmt.Sprintf("員工_%06d", i)
+			org = fmt.Sprintf("TSMC.製造部_%02d", (i-12)%10+1)
+			if i <= cfg.Managers {
+				level = "MANAGER_L2"
+				name = fmt.Sprintf("部經理_%02d", i-1)
+				org = fmt.Sprintf("TSMC.製造部_%02d", i-1)
+			} else {
+				name = fmt.Sprintf("員工_%06d", i)
+			}
 		}
 		sep := ","
 		if i == cfg.Employees {

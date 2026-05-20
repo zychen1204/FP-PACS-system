@@ -1,29 +1,26 @@
 # ============================================================
-# 07-load-tester.yaml
+# 12-cloud-seed.yaml
 #
-# 手動執行 PostgreSQL 歷史刷卡資料產生與匯入：
-#   kubectl delete job pacs-load-test -n pacs --ignore-not-found
-#   sed 's|gcr.io/PROJECT_ID|gcr.io/<PROJECT_ID>|g' k8s/07-load-tester.yaml | kubectl apply -f -
-#   kubectl logs -f job/pacs-load-test -n pacs
+# 手動執行 90,000 人 PostgreSQL 資料播種：
+#   kubectl delete job pacs-cloud-seed -n pacs --ignore-not-found
+#   kubectl apply -f k8s/12-cloud-seed.yaml
+#   kubectl logs -f job/pacs-cloud-seed -n pacs
 #
 # 需求：
-#   - pacs-load-generator image 已推到 registry
+#   - deploy-to-gke.sh 已建立 pacs-cloud-seed-sql ConfigMap
 #   - GKE/Kubernetes 支援 restartable init sidecar (1.29+)
 # ============================================================
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pacs-load-test
+  name: pacs-cloud-seed
   namespace: pacs
   labels:
-    app: load-tester
+    app: pacs-cloud-seed
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 86400
   template:
-    metadata:
-      labels:
-        app: load-tester
     spec:
       serviceAccountName: pacs-sa
       restartPolicy: Never
@@ -83,39 +80,20 @@ spec:
               name: pacs-secrets
               key: DB_PASSWORD
       containers:
-      - name: load-tester
-        image: gcr.io/PROJECT_ID/pacs-load-generator:latest
-        imagePullPolicy: Always
+      - name: seed
+        image: postgres:16-alpine
         command:
         - sh
         - -c
         - |
           set -eu
-          SQL_FILE=/work/seed_history_events.sql
-          load-generator \
-            --mode "$LOAD_TEST_MODE" \
-            --days "$LOAD_TEST_DAYS" \
-            --workers "$LOAD_TEST_WORKERS" \
-            --qps-scale "$LOAD_TEST_QPS_SCALE" \
-            --api http://access-api:8080 \
-            --report http://reporting-api:8081 \
-            --sql-output "$SQL_FILE" \
-            --dry-run
           psql -v ON_ERROR_STOP=1 \
             -h 127.0.0.1 -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-            -f "$SQL_FILE"
+            -f /seed/0104_cloud_seed.up.sql
           psql -v ON_ERROR_STOP=1 \
             -h 127.0.0.1 -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-            -c "ANALYZE access_events; SELECT reason, COUNT(*) FROM access_events WHERE reason = '[STRESS_TEST]' GROUP BY reason;"
+            -c "ANALYZE employees; SELECT job_level, COUNT(*) FROM employees WHERE is_active GROUP BY job_level ORDER BY job_level;"
         env:
-        - name: LOAD_TEST_MODE
-          value: "cloud"
-        - name: LOAD_TEST_DAYS
-          value: "7"
-        - name: LOAD_TEST_WORKERS
-          value: "50"
-        - name: LOAD_TEST_QPS_SCALE
-          value: "1.0"
         - name: DB_USER
           valueFrom:
             configMapKeyRef:
@@ -138,15 +116,16 @@ spec:
               key: DB_PASSWORD
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "256Mi"
+            cpu: "200m"
           limits:
-            memory: "2Gi"
-            cpu: "1500m"
+            memory: "512Mi"
+            cpu: "500m"
         volumeMounts:
-        - name: work
-          mountPath: /work
+        - name: cloud-seed-sql
+          mountPath: /seed
+          readOnly: true
       volumes:
-      - name: work
-        emptyDir:
-          sizeLimit: 8Gi
+      - name: cloud-seed-sql
+        configMap:
+          name: pacs-cloud-seed-sql
