@@ -30,14 +30,6 @@
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">出席報表</span>
             </a>
-            <a href="#" class="nav-item" data-tab="manager-tab">
-                <span class="nav-icon">👔</span>
-                <span class="nav-label">主管視野</span>
-            </a>
-            <a href="#" class="nav-item" data-tab="trend-tab">
-                <span class="nav-icon">📈</span>
-                <span class="nav-label">趨勢分析</span>
-            </a>
             <a href="#" class="nav-item" data-tab="alerts-tab">
                 <span class="nav-icon">⚠️</span>
                 <span class="nav-label">警報異常</span>
@@ -65,7 +57,6 @@
         <header class="top-header">
             <div class="header-left">
                 <h1 id="page-title">刷卡模擬器</h1>
-                <p id="page-subtitle">模擬員工在閘門刷卡的行為</p>
             </div>
             <div class="header-right">
                 <div class="server-status">
@@ -83,7 +74,6 @@
                     <div class="card">
                         <div class="card-header">
                             <h3>🔑 刷卡模擬器</h3>
-                            <p>模擬員工在外層/內層閘門的刷卡動作</p>
                         </div>
 
                         <div class="form-row" style="margin-bottom: 25px;">
@@ -179,13 +169,54 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>📊 出席報表</h3>
-                        <p>員工每日出席紀錄總覽</p>
+                        <p></p>
                     </div>
 
-                    <div class="filter-section">
+                    <div class="filter-section" style="flex-wrap: wrap;">
+                        <div class="form-group" style="flex-basis: 100%;">
+                            <label>查詢模式</label>
+                            <div class="mode-selector">
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="self" checked>
+                                    <span>👤 自己的出缺席</span>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="org">
+                                    <span>🏢 底下組織</span>
+                                </label>
+                            </div>
+                        </div>
                         <div class="form-group">
-                            <label for="attendance-date">日期</label>
-                            <input type="date" id="attendance-date">
+                            <label for="attendance-employee-id">員工 ID</label>
+                            <input type="text" id="attendance-employee-id" placeholder="例: B001" required>
+                        </div>
+                        <div class="form-group">
+                            <label>時間維度</label>
+                            <div class="period-type-selector">
+                                <button class="period-btn active" data-period="day">日</button>
+                                <button class="period-btn" data-period="month">月</button>
+                                <button class="period-btn" data-period="quarter">季</button>
+                            </div>
+                        </div>
+                        <div class="form-group" id="picker-day">
+                            <label for="attendance-date-day">選擇日期</label>
+                            <input type="date" id="attendance-date-day">
+                        </div>
+                        <div class="form-group" id="picker-month" style="display:none;">
+                            <label for="attendance-date-month">選擇月份</label>
+                            <input type="month" id="attendance-date-month">
+                        </div>
+                        <div class="form-group" id="picker-quarter" style="display:none;">
+                            <label>選擇季度</label>
+                            <div style="display:flex; gap:8px;">
+                                <select id="attendance-quarter-year"></select>
+                                <select id="attendance-quarter-q">
+                                    <option value="1">Q1（1-3月）</option>
+                                    <option value="2">Q2（4-6月）</option>
+                                    <option value="3">Q3（7-9月）</option>
+                                    <option value="4">Q4（10-12月）</option>
+                                </select>
+                            </div>
                         </div>
                         <button id="btn-fetch-attendance" class="btn btn-primary">
                             📥 查詢
@@ -193,28 +224,25 @@
                         <button id="btn-export-attendance" class="btn btn-secondary">
                             📥 下載 Excel
                         </button>
+                        <button id="btn-org-trend" class="btn btn-info" style="display:none;">
+                            📈 底下組織趨勢
+                        </button>
                     </div>
 
                     <div id="attendance-response" class="response-box">
+                        <div id="attendance-scope-bar" class="manager-scope-display" style="display:none;">
+                            <div class="scope-info">
+                                <span>管理部門: </span>
+                                <strong id="attendance-scope">-</strong>
+                            </div>
+                        </div>
                         <div id="attendance-stats" class="stats-grid"></div>
                         <div class="table-wrapper">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>員工 ID</th>
-                                        <th>姓名</th>
-                                        <th>身分</th>
-                                        <th>部門</th>
-                                        <th>日期</th>
-                                        <th>進入時間</th>
-                                        <th>離開時間</th>
-                                        <th>刷卡次數</th>
-                                        <th>停留時數</th>
-                                    </tr>
-                                </thead>
+                            <table class="table" id="attendance-table">
+                                <thead id="attendance-thead"></thead>
                                 <tbody id="attendance-tbody">
                                     <tr class="empty">
-                                        <td colspan="9">點擊「查詢」以載入資料</td>
+                                        <td colspan="9">選擇查詢模式後點擊「查詢」</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -223,120 +251,6 @@
                 </div>
             </section>
 
-            <!-- 3. Manager Team Tab -->
-            <section id="manager-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>👔 主管視野報表</h3>
-                        <p>查看所屬部門及下屬部門的出席情況（需要管理員權限）</p>
-                    </div>
-
-                    <div class="filter-section">
-                        <div class="form-group">
-                            <label for="manager-badge">主管證件 ID </label>
-                            <input type="text" id="manager-badge" placeholder="例: B100" value="B100">
-                        </div>
-                        <div class="form-group">
-                            <label for="manager-date">日期</label>
-                            <input type="date" id="manager-date">
-                        </div>
-                        <button id="btn-fetch-manager" class="btn btn-primary">
-                            📥 查詢團隊
-                        </button>
-                    </div>
-
-                    <div id="manager-response" class="response-box">
-                        <div class="manager-scope-display">
-                            <div class="scope-info">
-                                <span id="manager-scope-label">管理部門: </span>
-                                <strong id="manager-scope">-</strong>
-                            </div>
-                        </div>
-                        <div class="table-wrapper">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>員工 ID</th>
-                                        <th>姓名</th>
-                                        <th>身分</th>
-                                        <th>部門</th>
-                                        <th>日期</th>
-                                        <th>進入時間</th>
-                                        <th>離開時間</th>
-                                        <th>刷卡次數</th>
-                                        <th>停留時數</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="manager-tbody">
-                                    <tr class="empty">
-                                        <td colspan="9">點擊「查詢團隊」以載入資料</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 4. Trend Analysis Tab -->
-            <section id="trend-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>📈 趨勢分析</h3>
-                        <p>分析出席狀況的時間趨勢</p>
-                    </div>
-
-                    <div class="filter-section">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="trend-as">證件 ID </label>
-                                <input type="text" id="trend-as" placeholder="例: B100">
-                            </div>
-                            <div class="form-group">
-                                <label for="trend-metric">顯示指標</label>
-                                <select id="trend-metric">
-                                    <option value="avg_stay_hrs">平均停留時數</option>
-                                    <option value="head_count">出勤人頭數</option>
-                                    <option value="total_swipes">總刷卡次數</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="trend-period">維度</label>
-                                <select id="trend-period">
-                                    <option value="day">日 (Day)</option>
-                                    <option value="week">週 (Week)</option>
-                                    <option value="month">月 (Month)</option>
-                                    <option value="quarter">季 (Quarter)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="trend-start">開始日期</label>
-                                <input type="date" id="trend-start">
-                            </div>
-                            <div class="form-group">
-                                <label for="trend-end">結束日期</label>
-                                <input type="date" id="trend-end">
-                            </div>
-                        </div>
-                        <button id="btn-fetch-trend" class="btn btn-primary">
-                            📊 生成趨勢圖
-                        </button>
-                    </div>
-
-                    <div id="trend-response" class="response-box">
-                        <div class="manager-scope-display" style="margin-bottom: 20px;">
-                            <div class="scope-info">
-                                <span class="label">分析範圍 (Scope)：</span>
-                                <span id="trend-scope-display" class="value">-</span>
-                            </div>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="trend-chart"></canvas>
-                        </div>
-                        <div class="trend-stats" id="trend-stats"></div>
-                    </div>
-                </div>
-            </section>
 
             <!-- 5. Alerts Tab -->
             <section id="alerts-tab" class="tab-content">
@@ -444,6 +358,19 @@
             </section>
         </div>
     </main>
+
+    <!-- Trend / Audit Modal -->
+    <div id="trend-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="trend-modal-title">📈 分析</h3>
+                <button id="btn-close-trend-modal" class="modal-close">✕</button>
+            </div>
+            <div id="trend-modal-body" class="modal-body">
+                <div id="trend-modal-loading" style="text-align:center; padding:40px; color:var(--text-secondary);">載入中...</div>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>
