@@ -64,6 +64,9 @@ func main() {
 	authed.GET("/v1/reports/attendance/export", exportAttendance)
 	// FR-11 警報列表
 	authed.GET("/v1/alerts", listAlerts)
+	// month/quarter aggregated (per-employee totals)
+	authed.GET("/v1/reports/attendance/aggregated", getAttendanceAggregated)
+	authed.GET("/v1/reports/manager-team/aggregated", getManagerTeamAggregated)
 
 	port := envOrDefault("PORT", "8081")
 
@@ -89,9 +92,10 @@ func main() {
 }
 
 func getAttendanceReport(c *gin.Context) {
-	date := c.Query("date") // optional: ?date=2026-05-03
+	badgeID := c.Query("as")
+	startDate, endDate := resolveDateRange(c)
 
-	reports, err := database.QueryAttendance(c.Request.Context(), date)
+	reports, err := database.QueryAttendance(c.Request.Context(), badgeID, startDate, endDate)
 	if err != nil {
 		fmt.Printf("[ERROR] Query failed: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query attendance"})
@@ -154,8 +158,8 @@ func getManagerTeamReport(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not a manager", "badge_id": badgeID})
 		return
 	}
-	date := c.Query("date")
-	reports, err := database.QueryManagerTeamAttendance(c.Request.Context(), scope, date)
+	startDate, endDate := resolveDateRange(c)
+	reports, err := database.QueryManagerTeamAttendance(c.Request.Context(), scope, startDate, endDate)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("query failed: %v", err)})
 		return
@@ -188,7 +192,8 @@ func getAttendanceTrend(c *gin.Context) {
 	if trends == nil {
 		trends = []models.AttendanceTrend{}
 	}
-	c.JSON(http.StatusOK, gin.H{"scope": scope, "trends": trends})
+	summary := computeTrendSummary(trends)
+	c.JSON(http.StatusOK, gin.H{"scope": scope, "trends": trends, "summary": summary})
 }
 
 // exportAttendance — FR-8：產出 Excel（xlsx），PDF 延後。
@@ -199,8 +204,9 @@ func exportAttendance(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only format=excel supported in this phase"})
 		return
 	}
-	date := c.Query("date")
-	reports, err := database.QueryAttendance(c.Request.Context(), date)
+	badgeID := c.Query("as")
+	startDate, endDate := resolveDateRange(c)
+	reports, err := database.QueryAttendance(c.Request.Context(), badgeID, startDate, endDate)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("query failed: %v", err)})
 		return
@@ -243,16 +249,17 @@ func exportAttendance(c *gin.Context) {
 	}
 }
 
-// listAlerts — FR-11 read side。?open=true 只列未處理；?limit=N 限制筆數。
+// listAlerts — FR-11 read side。?open=true 只列未處理；?severity=HIGH；?limit=N。
 func listAlerts(c *gin.Context) {
 	openOnly := c.Query("open") == "true"
+	severity := c.Query("severity")
 	limit := 100
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			limit = n
 		}
 	}
-	alerts, err := database.QueryAlerts(c.Request.Context(), openOnly, limit)
+	alerts, err := database.QueryAlerts(c.Request.Context(), openOnly, severity, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("alerts query failed: %v", err)})
 		return
@@ -261,6 +268,73 @@ func listAlerts(c *gin.Context) {
 		alerts = []models.Alert{}
 	}
 	c.JSON(http.StatusOK, alerts)
+}
+
+// getAttendanceAggregated — per-employee totals for month/quarter (self mode).
+func getAttendanceAggregated(c *gin.Context) {
+	badgeID := c.Query("as")
+	startDate, endDate := resolveDateRange(c)
+	aggs, err := database.QueryEmployeeAggregated(c.Request.Context(), badgeID, "", startDate, endDate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query aggregated attendance"})
+		return
+	}
+	if aggs == nil {
+		aggs = []models.EmployeeAggregate{}
+	}
+	c.JSON(http.StatusOK, aggs)
+}
+
+// getManagerTeamAggregated — team per-employee totals for month/quarter (org mode).
+func getManagerTeamAggregated(c *gin.Context) {
+	badgeID := c.Query("as")
+	if badgeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "as (manager badge_id) is required"})
+		return
+	}
+	scope, err := database.GetManagerScope(c.Request.Context(), badgeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("scope lookup failed: %v", err)})
+		return
+	}
+	if scope == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a manager", "badge_id": badgeID})
+		return
+	}
+	startDate, endDate := resolveDateRange(c)
+	aggs, err := database.QueryEmployeeAggregated(c.Request.Context(), "", scope, startDate, endDate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("query failed: %v", err)})
+		return
+	}
+	if aggs == nil {
+		aggs = []models.EmployeeAggregate{}
+	}
+	c.JSON(http.StatusOK, gin.H{"manager_scope": scope, "aggregates": aggs})
+}
+
+// computeTrendSummary derives period-level averages from trend buckets.
+func computeTrendSummary(trends []models.AttendanceTrend) models.TrendSummary {
+	if len(trends) == 0 {
+		return models.TrendSummary{}
+	}
+	var totalSwipes, totalHeadCount int
+	var totalStayHrs float64
+	for _, t := range trends {
+		totalSwipes += t.TotalSwipes
+		totalHeadCount += t.HeadCount
+		totalStayHrs += t.AvgStayHrs
+	}
+	n := float64(len(trends))
+	avgSwipesPerPerson := 0.0
+	if totalHeadCount > 0 {
+		avgSwipesPerPerson = float64(totalSwipes) / float64(totalHeadCount)
+	}
+	return models.TrendSummary{
+		AvgSwipesPerPerson: avgSwipesPerPerson,
+		AvgHeadCount:       float64(totalHeadCount) / n,
+		AvgStayHrs:         totalStayHrs / n,
+	}
 }
 
 func healthCheck(c *gin.Context) {
@@ -309,6 +383,17 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// resolveDateRange extracts start_date and end_date from the request.
+// Supports both ?date=YYYY-MM-DD (single day) and ?start_date=...&end_date=... (range).
+func resolveDateRange(c *gin.Context) (startDate, endDate string) {
+	startDate = c.Query("start_date")
+	endDate = c.Query("end_date")
+	if date := c.Query("date"); date != "" && startDate == "" {
+		startDate, endDate = date, date
+	}
+	return
 }
 
 func envOrDefault(key, fallback string) string {

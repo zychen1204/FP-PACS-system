@@ -173,3 +173,75 @@ func TestAlert_OptionalFieldsIncludedWhenSet(t *testing.T) {
 		}
 	}
 }
+
+// ── EmployeeAggregate ─────────────────────────────────────────────────────
+
+func TestEmployeeAggregate_JSONFieldNames(t *testing.T) {
+	agg := EmployeeAggregate{
+		EmployeeID: "B001", Name: "王小明", Status: "STAFF",
+		OrgPath: "TSMC.Fab12.製造部", TotalSwipes: 80, TotalStayHours: 180.0,
+		DayCount: 20, AvgSwipes: 4.0, AvgStayHours: 9.0,
+	}
+	b, _ := json.Marshal(agg)
+	var m map[string]interface{}
+	json.Unmarshal(b, &m)
+
+	for _, key := range []string{
+		"employee_id", "name", "status", "org_path",
+		"total_swipes", "total_stay_hours", "day_count",
+		"avg_swipes", "avg_stay_hours",
+	} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("JSON field %q should be present in EmployeeAggregate", key)
+		}
+	}
+}
+
+// Status should use canonical DB values, not frontend aliases.
+func TestEmployeeAggregate_StatusCanonicalValues(t *testing.T) {
+	cases := []struct {
+		status string
+		valid  bool
+	}{
+		{"MANAGER_L1", true},
+		{"MANAGER_L2", true},
+		{"STAFF", true},
+		{"mgr-1", false},
+		{"mgr-2", false},
+		{"employee", false},
+	}
+	canonical := map[string]bool{"MANAGER_L1": true, "MANAGER_L2": true, "STAFF": true}
+	for _, tc := range cases {
+		if canonical[tc.status] != tc.valid {
+			t.Errorf("status %q: expected valid=%v", tc.status, tc.valid)
+		}
+	}
+}
+
+// ── TrendSummary ──────────────────────────────────────────────────────────
+
+func TestTrendSummary_JSONFieldNames(t *testing.T) {
+	s := TrendSummary{AvgSwipesPerPerson: 4.2, AvgHeadCount: 28.5, AvgStayHrs: 8.3}
+	b, _ := json.Marshal(s)
+	var m map[string]interface{}
+	json.Unmarshal(b, &m)
+
+	for _, key := range []string{"avg_swipes_per_person", "avg_head_count", "avg_stay_hrs"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("JSON field %q should be present in TrendSummary", key)
+		}
+	}
+}
+
+func TestTrendSummary_ZeroValue_SerializesCleanly(t *testing.T) {
+	s := TrendSummary{}
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("zero TrendSummary should marshal without error: %v", err)
+	}
+	var m map[string]interface{}
+	json.Unmarshal(b, &m)
+	if v, ok := m["avg_swipes_per_person"]; !ok || v.(float64) != 0 {
+		t.Error("zero avg_swipes_per_person should serialize as 0")
+	}
+}

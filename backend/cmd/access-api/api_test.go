@@ -398,3 +398,46 @@ func TestCORSPreflight_Returns204(t *testing.T) {
 		t.Errorf("OPTIONS preflight got=%d want=204", w.Code)
 	}
 }
+
+// ── NFR: Access API handler latency (sub-50ms SLA) ────────────────────────
+//
+// The swipe handler is engineered for sub-50ms end-to-end. With an in-process
+// miniredis, total latency is dominated by handler + loopback Redis. The handler
+// overhead alone (business logic + JSON marshal) must stay under 5ms to leave
+// ample budget for real Redis RTT (~0.5ms LAN) and TLS in production.
+// Architecture note: DB write is fully async (Redis Stream → event-processor),
+// so the hot path never touches PostgreSQL.
+
+const swipeHandlerBudget = 5 * time.Millisecond
+
+func TestHandleSwipe_HandlerLatency_Sub50ms(t *testing.T) {
+	r := newTestRouter()
+
+	const iterations = 20
+	var total time.Duration
+	for i := 0; i < iterations; i++ {
+		// Use unique badge per iteration to avoid APB state interference.
+		badge := "PERF_" + string(rune('A'+i))
+		start := time.Now()
+		w := doSwipe(r, badge, "1-A", "IN")
+		total += time.Since(start)
+		if w.Code != http.StatusOK {
+			t.Fatalf("unexpected status %d on iteration %d", w.Code, i)
+		}
+	}
+	avg := total / iterations
+	if avg > swipeHandlerBudget {
+		t.Errorf("swipe handler avg latency %v exceeds %v budget (sub-50ms SLA needs fast handler)",
+			avg, swipeHandlerBudget)
+	}
+}
+
+// BenchmarkHandleSwipe measures raw throughput of the swipe handler.
+func BenchmarkHandleSwipe(b *testing.B) {
+	r := newTestRouter()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		badge := "BENCH_" + strings.Repeat("X", i%8)
+		doSwipe(r, badge, "1-A", "IN")
+	}
+}
