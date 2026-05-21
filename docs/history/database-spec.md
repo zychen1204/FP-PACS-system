@@ -76,6 +76,18 @@ Badge Reader ──► access-api ──► Redis Cache (Anti-Passback)
 
 當前實作對應 **Phase 2**。Phase 3 升級路徑見 §6。
 
+### 4.1 三個 Phase 的 seed / 壓測工具對應
+
+| Phase | DAU | Seed 工具 | 壓測（k6） |
+|---|---|---|---|
+| Phase 1 (1k) | 1,000 | `0103_seed_local` (auto) 或 `seed-generator --mode local` | `k6 shift_burst.js BADGE_COUNT=1000` |
+| Phase 2 (30k) | 30,000 | `seed-generator --mode fab --days N` | `k6 shift_burst.js BADGE_COUNT=30000` |
+| Phase 3 (90k) | 90,000 | `cloud_migrations/0104_cloud_seed` (手動跑) | `k6 shift_burst.js BADGE_COUNT=90000` |
+
+`seed-generator`（`scripts/seed-generator/`）只做歷史 SQL 灌資料，不打 access-api；
+即時 NFR-1 / NFR-2 / NFR-4 threshold 驗證一律走 k6。詳見
+[`../SimulationGuide.md`](../SimulationGuide.md) 與 [`../LoadTestGuide.md`](../LoadTestGuide.md)。
+
 ## 5. HW2 已選型 / 已 commit 的設計
 
 不可動搖（除非更新 HW2 設計）：

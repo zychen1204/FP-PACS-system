@@ -2,10 +2,11 @@
 
 Database build artefacts for PACS. PostgreSQL 16 schema is managed via
 [golang-migrate](https://github.com/golang-migrate/migrate); fixtures
-are manual-load helpers for performance testing.
+are manual-load helpers for performance testing. Seed + load-test
+工具拆分為兩個獨立目錄。
 
-> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0100~0101 + 0099）。
-> 設計脈絡見 [`../docs/PHASE2_CHANGES.md`](../docs/PHASE2_CHANGES.md)。
+> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0099 + 0100~0103 + 0105）。
+> 設計脈絡見 [`../docs/history/PHASE2_CHANGES.md`](../docs/history/PHASE2_CHANGES.md)。
 
 ```
 scripts/
@@ -16,11 +17,24 @@ scripts/
 │   ├── 0004_alerts_table.{up,down}.sql                         Phase 2: FR-11 alerts table (CHECK 列舉 + 索引)
 │   ├── 0005_partition_access_events.{up,down}.sql              Phase 2: access_events RANGE-partition by month (36 個月)
 │   ├── 0006_mv_daily_attendance.{up,down}.sql                  Phase 2: materialized view + UNIQUE + GiST 索引
+│   ├── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
 │   ├── 0100_protect_access_event_partitions.{up,down}.sql      Phase 2 hardening: FR-12 trigger 擴到每個子 partition
-│   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition() function
-│   └── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
-└── fixtures/
-    └── load_test.sql                                           10k events fixture for NFR-2 EXPLAIN ANALYZE
+│   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition()
+│   ├── 0102_replace_is_manager_with_job_level.{up,down}.sql    schema evolution: is_manager BOOLEAN → job_level VARCHAR + CHECK
+│   ├── 0103_seed_local.{up,down}.sql                           Phase 1 baseline seed: 1k employees (auto-run via docker compose)
+│   └── 0105_fix_stay_hours_aggregation.{up,down}.sql           FR-5 fix: stay_hours 改用 LAG window function 配對 IN→OUT 累加
+├── cloud_migrations/
+│   └── 0104_cloud_seed.{up,down}.sql                           Phase 3 seed: 90k employees (手動執行；非 auto-migrate)
+├── fixtures/
+│   └── load_test.sql                                           10k events fixture for NFR-2 EXPLAIN ANALYZE
+├── seed-generator/                                             歷史資料 SQL 種子產生器（demo 用，不做即時壓測）
+│   ├── main.go                                                 CLI：--mode local|fab|cloud / --employees N / --days N
+│   └── realistic-simulator.go                                  含週末/假日/午休/出缺席邏輯，產 seed_history_events.sql
+└── k6-load-test/                                               即時 HTTP 壓測（grafana/k6 image）
+    ├── shift_burst.js                                          HW2 §4.2 換班尖峰；NFR-1 P99<50ms threshold
+    ├── steady_baseline.js                                      常態 QPS 基準對照
+    ├── mixed_read_write.js                                     CQRS 解耦驗證；NFR-1 + NFR-2 雙 threshold
+    └── lib/                                                    badge pool + Anti-Passback friendly direction picker
 ```
 
 > 註：golang-migrate 依整數版本號排序，實際執行順序為
@@ -51,10 +65,12 @@ The schema 由 `0001_init_schema` baseline 起跳（tables, indexes, triggers,
 | `0004` | Phase 2 FR-11 警報表 |
 | `0005` | Phase 2 §5.3 partition by month |
 | `0006` | Phase 2 §5.3 materialized view |
+| `0102` | 多階主管：is_manager BOOLEAN 太粗糙，改 `job_level VARCHAR + CHECK`（STAFF/MANAGER_L1/MANAGER_L2）|
+| `0103` | Phase 1 baseline seed：1k 員工 + 部門結構（docker compose 自動執行）|
+| `0105` | FR-5 嚴謹語意：stay_hours 改用 LAG window function 配對 IN→OUT 累加（午餐外出不算廠內）|
 
-`0099_dev_seed` 永遠保持最後一支：FR-12 immutability 不允許 `down` 刪 INSERTs，
-所以重置 demo 資料只能用 `docker compose down -v`；耦合到 schema migration
-會造成混亂 semantics。
+`0099_dev_seed` 與 `0103_seed_local` 都是 seed migration，FR-12 immutability 不允許 `down`
+刪 INSERTs，所以重置 demo 資料只能用 `docker compose down -v`。
 
 ## How migrations run
 
@@ -86,8 +102,8 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 
 ## Adding a new migration
 
-1. Pick the next free four-digit prefix（已使用至 `0006` + `0100`/`0101`；
-   next available 是 `0007` 或 `0102`，看是 Phase 2 完工項目還是後續 hardening）。
+1. Pick the next free four-digit prefix（已使用至 `0006` + `0099` + `0100`~`0103` + `0105`；
+   next available 是 `0007` 或 `0106`）。
 2. Create both files: `NNNN_short_description.up.sql` and `.down.sql`。
 3. `up` 檔在合理範圍內 idempotent（`IF NOT EXISTS`、`CREATE OR REPLACE`、
    `DROP ... IF EXISTS`）；`down` 檔應精確 undo `up`，除非被 FR-12 immutability 阻擋。
@@ -111,7 +127,22 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | `0099` | dev seed（only loaded in dev/demo；不再嚴格保證最後）|
 | `0100` | Phase 2 hardening：FR-12 trigger 擴到每個子 partition |
 | `0101` | Phase 2 hardening：default partition + `ensure_access_event_partition()` 預建函式 |
-| `0102+` | future hardening / Phase 3 schema 改動 |
+| `0102` | schema evolution：is_manager → job_level (多階主管) |
+| `0103` | Phase 1 baseline seed：1k 員工 + 部門結構（自動執行）|
+| `0104` | **cloud_migrations/** 的 Phase 3 90k 員工 seed（手動執行，不在 auto-migrate 路徑）|
+| `0105` | FR-5 fix：stay_hours 改 IN/OUT 累加 |
+| `0106+` | future hardening / Phase 3 schema 改動 |
+
+## 壓測規模 vs Phase 對照
+
+| 工具 / 規模 | 員工數 | 對應 HW2 Phase | 用法 |
+|---|---|---|---|
+| `0103_seed_local` (auto) | 1,000 | Phase 1 試點 | docker compose 啟動自動執行 |
+| `seed-generator --mode local --days N` | 1,000 | Phase 1 | 灌 N 天歷史打卡 |
+| `seed-generator --mode fab --days N` | 30,000 | Phase 2 全廠 | 同上，HW2 §4.2 規格 |
+| `seed-generator --mode cloud --days N` | 90,000 | Phase 3 | 不推薦（SQL 檔過大），改用 `0104_cloud_seed` |
+| `0104_cloud_seed` (manual) | 90,000 | Phase 3 | `gcloud sql connect ... < 0104_cloud_seed.up.sql` |
+| `k6-load-test/*.js` | 即時打 API | 任意 phase | 驗 NFR-1/2/4 threshold；不灌資料 |
 
 ## Roles
 
