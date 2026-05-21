@@ -1581,4 +1581,86 @@ hr {
     font-size: 13px;
 }
 
+/* ============================================
+   Utility / Component Classes
+   ============================================ */
 
+.clickable-row {
+    cursor: pointer;
+}
+
+.clickable-row:hover {
+    background: rgba(30, 64, 175, 0.15) !important;
+}
+
+.modal-loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+}
+
+.quarter-select-row {
+    display: flex;
+    gap: 8px;
+}
+
+.error-inline {
+    color: var(--danger);
+}
+
+.metric-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.metric-control label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.metric-select {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+}
+
+.response-box-mt {
+    margin-top: 1rem;
+}
+
+.filter-section-wrap {
+    flex-wrap: wrap;
+}
+
+.form-group-full {
+    flex-basis: 100%;
+}
+
+.flex-1 {
+    flex: 1;
+}
+
+.mr-15 {
+    margin-right: 15px;
+}
+
+.form-row-spaced {
+    margin-bottom: 25px;
+}
+
+.stats-grid-mb {
+    margin-bottom: 20px;
+}
+
+.modal-chart-300 {
+    height: 300px;
+}
+
+.modal-chart-320 {
+    height: 320px;
+}

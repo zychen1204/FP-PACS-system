@@ -445,19 +445,19 @@ function buildAttendanceHeader(period, mode) {
         } else {
             thead.innerHTML = `<tr>
                 <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
-                <th>日期</th><th>進入時間</th><th>離開時間</th><th>刷卡次數</th><th>停留時數</th>
+                <th>日期</th><th>最早進入時間</th><th>最晚離開時間</th><th>刷卡次數</th><th>停留時數</th>
             </tr>`;
         }
     } else {
         if (mode === 'self') {
             thead.innerHTML = `<tr>
                 <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
-                <th>${prefix}刷卡平均次</th><th>${prefix}平均停留時數</th>
+                <th>${prefix}刷卡平均次數</th><th>${prefix}平均停留時數</th>
             </tr>`;
         } else {
             thead.innerHTML = `<tr>
                 <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
-                <th>${prefix}刷卡總數</th><th>${prefix}刷卡平均次</th>
+                <th>${prefix}刷卡總數</th><th>${prefix}刷卡平均次數</th>
                 <th>${prefix}總停留時數</th><th>${prefix}平均停留時數</th>
             </tr>`;
         }
@@ -519,12 +519,12 @@ function displayAttendanceReport(reports, scope, mode, period) {
         tbody.innerHTML = reports.map(r => {
             const identity = getRoleBadge(r);
             if (mode === 'self') {
-                return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" style="cursor:pointer;" title="點擊查看當日刷卡紀錄">
+                return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" title="點擊查看當日刷卡紀錄">
                     <td>${r.employee_id}</td><td>${r.name || '-'}</td><td>${identity}</td><td>${r.org_path || '-'}</td>
                     <td>${formatTime(r.first_in)}</td><td>${formatTime(r.last_out)}</td>
                 </tr>`;
             }
-            return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" style="cursor:pointer;" title="點擊查看當日刷卡紀錄">
+            return `<tr class="clickable-row" data-id="${r.employee_id}" data-name="${r.name || r.employee_id}" data-date="${r.work_date}" data-type="audit" title="點擊查看當日刷卡紀錄">
                 <td>${r.employee_id}</td><td>${r.name || '-'}</td><td>${identity}</td><td>${r.org_path || '-'}</td>
                 <td>${r.work_date || '-'}</td><td>${formatTime(r.first_in)}</td><td>${formatTime(r.last_out)}</td>
                 <td><strong>${r.swipe_count}</strong></td><td>${r.stay_hours ? r.stay_hours.toFixed(1) + ' hr' : '-'}</td>
@@ -534,12 +534,12 @@ function displayAttendanceReport(reports, scope, mode, period) {
         tbody.innerHTML = reports.map(e => {
             const identity = getRoleBadge(e);
             if (mode === 'self') {
-                return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
+                return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" title="點擊查看趨勢分析">
                     <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
                     <td>${(e.avg_swipes || 0).toFixed(1)}</td><td>${(e.avg_stay_hours || 0).toFixed(1)} hr</td>
                 </tr>`;
             }
-            return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" style="cursor:pointer;" title="點擊查看趨勢分析">
+            return `<tr class="clickable-row" data-id="${e.employee_id}" data-name="${e.name || e.employee_id}" data-type="trend" title="點擊查看趨勢分析">
                 <td>${e.employee_id}</td><td>${e.name || '-'}</td><td>${identity}</td><td>${e.org_path || '-'}</td>
                 <td><strong>${e.total_swipes || 0}</strong></td><td>${(e.avg_swipes || 0).toFixed(1)}</td>
                 <td>${(e.total_stay_hours || 0).toFixed(1)} hr</td><td>${(e.avg_stay_hours || 0).toFixed(1)} hr</td>
@@ -553,8 +553,6 @@ function displayAttendanceReport(reports, scope, mode, period) {
             if (type === 'audit') showDayAuditModal(id, name, date);
             else showPersonalTrendModal(id, name);
         });
-        row.addEventListener('mouseenter', () => row.style.background = 'rgba(30,64,175,0.15)');
-        row.addEventListener('mouseleave', () => row.style.background = '');
     });
 }
 
@@ -565,7 +563,7 @@ function displayAttendanceError(message) {
     const orgTrendBtn = document.getElementById('btn-org-trend');
     if (scopeBar) scopeBar.style.display = 'none';
     if (orgTrendBtn) orgTrendBtn.style.display = 'none';
-    statsContainer.innerHTML = `<div style="color: var(--danger);">❌ ${message}</div>`;
+    statsContainer.innerHTML = `<div class="error-inline">❌ ${message}</div>`;
     tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
 }
 
@@ -593,7 +591,7 @@ function openModal(title) {
     if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
     document.getElementById('trend-modal-title').textContent = title;
     document.getElementById('trend-modal-body').innerHTML =
-        `<div id="trend-modal-loading" style="text-align:center;padding:40px;color:var(--text-secondary);">載入中...</div>`;
+        `<div id="trend-modal-loading" class="modal-loading">載入中...</div>`;
     document.getElementById('trend-modal').style.display = 'flex';
 }
 
@@ -658,7 +656,7 @@ async function showDayAuditModal(employeeId, name, date) {
         if (!response.ok) throw new Error(events.error || '查詢失敗');
 
         if (!events || events.length === 0) {
-            setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">當日無刷卡紀錄</p>');
+            setModalContent('<p class="modal-loading">當日無刷卡紀錄</p>');
             return;
         }
 
@@ -698,7 +696,7 @@ async function showDayAuditModal(employeeId, name, date) {
 
         setModalContent(`<div class="audit-trail-container">${header}${rows}</div>`);
     } catch (err) {
-        setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
+        setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`);
     }
 }
 
@@ -708,14 +706,14 @@ function showPersonalTrendModal(employeeId, name) {
 
     const { period, startDate, endDate } = getPeriodDateRange();
     const chartHtml = `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-            <label style="font-size:13px;color:var(--text-secondary);">顯示指標</label>
-            <select id="personal-trend-metric" onchange="reRenderPersonalChart()" style="background:var(--bg-hover);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;">
+        <div class="metric-control">
+            <label>顯示指標</label>
+            <select id="personal-trend-metric" class="metric-select" onchange="reRenderPersonalChart()">
                 <option value="swipe_count">刷卡次數</option>
                 <option value="stay_hours">停留時數 (hrs)</option>
             </select>
         </div>
-        <div class="chart-container" style="height:320px;"><canvas id="modal-personal-chart"></canvas></div>
+        <div class="chart-container modal-chart-320"><canvas id="modal-personal-chart"></canvas></div>
     `;
 
     if (period === 'day') {
@@ -724,7 +722,7 @@ function showPersonalTrendModal(employeeId, name) {
             .filter(r => r.employee_id === employeeId)
             .sort((a, b) => a.work_date.localeCompare(b.work_date));
         if (!dailyData.length) {
-            setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
+            setModalContent('<p class="modal-loading">無資料</p>');
             return;
         }
         state.modalPersonalData = dailyData;
@@ -740,7 +738,7 @@ function showPersonalTrendModal(employeeId, name) {
                     .filter(r => r.employee_id === employeeId)
                     .sort((a, b) => a.work_date.localeCompare(b.work_date));
                 if (!dailyData.length) {
-                    setModalContent('<p style="text-align:center;padding:40px;color:var(--text-secondary);">無資料</p>');
+                    setModalContent('<p class="modal-loading">無資料</p>');
                     return;
                 }
                 state.modalPersonalData = dailyData;
@@ -748,7 +746,7 @@ function showPersonalTrendModal(employeeId, name) {
                 requestAnimationFrame(() => reRenderPersonalChart());
             })
             .catch(err => {
-                setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
+                setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`);
             });
     }
 }
@@ -842,24 +840,24 @@ async function showOrgTrend() {
             const pAvgStay    = (summary.avg_stay_hrs || 0).toFixed(2);
 
             setModalContent(`
-                <div class="stats-grid" style="margin-bottom:20px;">
+                <div class="stats-grid stats-grid-mb">
                     <div class="stat-item"><div class="stat-item-value">${pAvgSwipes}</div><div class="stat-item-label">${periodLabel}平均刷卡次數</div></div>
                     <div class="stat-item"><div class="stat-item-value">${pAvgPersons}</div><div class="stat-item-label">${periodLabel}平均出勤人數</div></div>
                     <div class="stat-item"><div class="stat-item-value">${pAvgStay}</div><div class="stat-item-label">${periodLabel}平均停留時數 (hrs)</div></div>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-                    <label style="font-size:13px;color:var(--text-secondary);">${periodLabel}顯示指標</label>
-                    <select id="org-trend-metric" onchange="reRenderOrgChart()" style="background:var(--bg-hover);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;">
+                <div class="metric-control">
+                    <label>${periodLabel}顯示指標</label>
+                    <select id="org-trend-metric" class="metric-select" onchange="reRenderOrgChart()">
                         <option value="avg_swipe">平均刷卡次數</option>
                         <option value="persons">出勤人數</option>
                         <option value="avg_stay">平均停留時數 (hrs)</option>
                     </select>
                 </div>
-                <div class="chart-container" style="height:300px;"><canvas id="modal-org-chart"></canvas></div>
+                <div class="chart-container modal-chart-300"><canvas id="modal-org-chart"></canvas></div>
             `);
             requestAnimationFrame(() => reRenderOrgChart());
         } catch (err) {
-            setModalContent(`<div style="color:var(--danger);padding:20px;">❌ ${err.message}</div>`);
+            setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`);
         }
     }
 }
