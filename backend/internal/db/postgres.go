@@ -73,45 +73,44 @@ func (p *PostgresDB) InsertEvent(ctx context.Context, event models.AccessEvent) 
 
 // QueryAttendance returns attendance reports filtered by badge and/or date range.
 // badgeID="" returns all badges; startDate/endDate="" skips that bound.
-// Hits idx_events_status_date partial index (event_date, badge_id WHERE status='SUCCESS').
+// Reads mv_daily_attendance — stay_hours is IN/OUT pair sum (migration 0105),
+// same MV used by QueryManagerTeamAttendance for consistency.
 func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, endDate string) ([]models.AttendanceReport, error) {
 	query := `
 		SELECT
-			e.badge_id,
-			COALESCE(emp.name, 'Employee ' || e.badge_id) AS name,
-			COALESCE(emp.org_path, 'Unknown')             AS org_path,
-			e.event_date::text                            AS work_date,
-			MIN(CASE WHEN e.direction = 'IN'  THEN e.event_time END) AS first_in,
-			MAX(CASE WHEN e.direction = 'OUT' THEN e.event_time END) AS last_out,
-			COUNT(*)                                      AS swipe_count,
-			COALESCE(emp.job_level, 'STAFF')              AS status
-		FROM access_events e
-		LEFT JOIN employees emp ON e.badge_id = emp.badge_id
-		WHERE e.status = 'SUCCESS'
+			mv.badge_id,
+			mv.name,
+			mv.org_path,
+			mv.event_date::text AS work_date,
+			mv.first_in,
+			mv.last_out,
+			mv.swipe_count,
+			COALESCE(mv.stay_hours, 0)::float8 AS stay_hours,
+			COALESCE(emp.job_level, 'STAFF')   AS status
+		FROM mv_daily_attendance mv
+		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
+		WHERE 1=1
 	`
 	args := []interface{}{}
 	idx := 1
 
 	if badgeID != "" {
-		query += fmt.Sprintf(" AND e.badge_id = $%d", idx)
+		query += fmt.Sprintf(" AND mv.badge_id = $%d", idx)
 		args = append(args, badgeID)
 		idx++
 	}
 	if startDate != "" {
-		query += fmt.Sprintf(" AND e.event_date >= $%d", idx)
+		query += fmt.Sprintf(" AND mv.event_date >= $%d", idx)
 		args = append(args, startDate)
 		idx++
 	}
 	if endDate != "" {
-		query += fmt.Sprintf(" AND e.event_date <= $%d", idx)
+		query += fmt.Sprintf(" AND mv.event_date <= $%d", idx)
 		args = append(args, endDate)
 		idx++
 	}
 
-	query += `
-		GROUP BY e.badge_id, emp.name, emp.org_path, emp.job_level, e.event_date
-		ORDER BY e.event_date DESC, e.badge_id
-	`
+	query += ` ORDER BY mv.event_date DESC, mv.badge_id`
 
 	rows, err := p.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -122,11 +121,8 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, en
 	var reports []models.AttendanceReport
 	for rows.Next() {
 		var r models.AttendanceReport
-		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.Status); err != nil {
+		if err := rows.Scan(&r.EmployeeID, &r.Name, &r.OrgPath, &r.WorkDate, &r.FirstIn, &r.LastOut, &r.SwipeCount, &r.StayHours, &r.Status); err != nil {
 			return nil, err
-		}
-		if r.FirstIn != nil && r.LastOut != nil {
-			r.StayHours = r.LastOut.Sub(*r.FirstIn).Hours()
 		}
 		reports = append(reports, r)
 	}
