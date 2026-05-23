@@ -125,7 +125,7 @@ erDiagram
 | `first_in` | `TIMESTAMPTZ` | `MIN(event_time) FILTER (direction='IN')` | 當日首次刷卡進入 |
 | `last_out` | `TIMESTAMPTZ` | `MAX(event_time) FILTER (direction='OUT')` | 當日最後刷卡離開 |
 | `swipe_count` | `BIGINT` | `COUNT(*)` | 當日刷卡次數（含 reject 不算，WHERE status='SUCCESS'）|
-| `stay_hours` | `FLOAT8` | `EXTRACT(EPOCH FROM (last_out - first_in)) / 3600` | 當日在廠停留時數 |
+| `stay_hours` | `FLOAT8` | LAG window function 配對 IN→OUT 累加（migration `0105`，取代 0006 baseline 的 `last_out - first_in`）| 當日在廠停留時數，扣除午餐 / 外出時段 |
 
 由 `mv-refresher` service 每 5 min 跑 `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_attendance`。
 
@@ -293,11 +293,16 @@ baseline migration `0001` 與 Phase 2 migrations `0003`/`0004`/`0005`/`0006` 中
 0100_protect_access_event_partitions ── 把 FR-12 trigger 重掛到每個 partition child
 0101_access_event_partition_safety   ── partition 安全網（default partition + helper functions）
 0102_replace_is_manager_with_job_level ── 以 VARCHAR + CHECK 的多階 job_level 取代二元 is_manager
+0103_seed_local          ── Phase 1 baseline seed：1k 員工 + 部門結構（docker compose 自動執行）
+0105_fix_stay_hours_aggregation ── FR-5 fix：stay_hours 改 LAG window 配對 IN→OUT 累加
+
+cloud_migrations/
+0104_cloud_seed          ── Phase 3 規模 seed：90k 員工（手動執行，非 auto-migrate）
 ```
 
-每支 migration 都有對應 `.down.sql`（0099 因 FR-12 immutability 不允許 DELETE 而為 no-op；要重置 demo 資料請用 `docker compose down -v`）。
+每支 migration 都有對應 `.down.sql`（`0099` / `0103` / `0104` 因 FR-12 immutability 不允許 DELETE 而為 no-op；要重置 demo 資料請用 `docker compose down -v`）。
 
-未來 Phase 3 升級（read replica、archive、AlloyDB / BigQuery）會以新 migration（`0007` 起）逐項加入。詳細工程規範：[`scripts/README.md`](../scripts/README.md)。
+未來 Phase 3 升級（read replica、archive、AlloyDB / BigQuery）會以新 migration（`0106` 起）逐項加入。詳細工程規範：[`scripts/README.md`](../scripts/README.md)。
 
 ## 8. Phase 2 落地狀態（已完成）
 

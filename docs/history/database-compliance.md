@@ -43,11 +43,12 @@
 
 | 項目 | 內容 |
 |---|---|
-| 規範 | 每筆事件含 timestamp / gate / direction；stay_hours 由報表計算 |
-| 實作 | `access_events` 的 `event_time / gate_id / direction` 欄位；reporting-api `QueryAttendance` 用 `MIN(IN) / MAX(OUT)` 配對；Phase 2 改用 `event_date` 直接命中索引 |
+| 規範 | 每筆事件含 timestamp / gate / direction；當日在廠停留時數 |
+| 實作 | `access_events` 的 `event_time / gate_id / direction` 欄位；`mv_daily_attendance` MV 預聚合（migration `0006` + `0105`）；reporting-api `QueryAttendance` 讀 MV |
+| stay_hours 演進 | 0006 baseline = `last_out - first_in` (head-tail)。**0105 fix**：改用 LAG window function 配對 IN→OUT 累加，午餐 / 外出時段不算廠內 |
 | 驗證 | `curl http://localhost:8081/v1/reports/attendance` |
-| 實測結果 | reporting-api 回 16 筆出勤紀錄，欄位 `employee_id / name / org_path / work_date / first_in / last_out / swipe_count / stay_hours` 全部填妥 |
-| 階段 | **P1 ✅** + **P2 query 改寫命中索引** |
+| 預期 | 員工 8:00 IN / 12:00 OUT / 13:00 IN / 18:00 OUT — last_out - first_in = 10h，但 stay_hours = 9h（IN/OUT 累加扣午餐外出）|
+| 階段 | **P1 ✅** + **P2 query 改寫命中索引 + 改讀 MV** + **0105 fix stay_hours 累加** |
 
 ### FR-6 階層式組織報表
 
@@ -130,9 +131,11 @@
 |---|---|
 | 規範 | access-api swipe P99 < 50 ms |
 | 實作 | access-api 完全不打 DB；只讀 Redis cache + 寫 Redis Streams |
-| 驗證 | 20 次 swipe + 計算 avg latency |
-| 實測結果 | avg 1.55 ms / min 0.99 ms / max 5.44 ms（30× margin） |
-| 階段 | **P1 ✅** |
+| 驗證 (1) — 微量 baseline | 20 次 swipe + 計算 avg latency |
+| 實測結果 (1) | avg 1.55 ms / min 0.99 ms / max 5.44 ms（30× margin） |
+| 驗證 (2) — 換班 burst | `scripts/k6-load-test/shift_burst.js`（HW2 §4.2 換班尖峰，5→100 QPS ramp + plateau）|
+| Threshold (k6) | `http_req_duration{endpoint:swipe} p(99)<50` 由 k6 自動斷言 pass/fail |
+| 階段 | **P1 ✅** + **k6 持續驗證** |
 
 ### NFR-2 報表 P95 < 200 ms
 
@@ -141,11 +144,13 @@
 | 規範 | 報表查詢 P95 < 200 ms |
 | 實作（索引）| partial index `idx_events_status_date (event_date, badge_id) WHERE status='SUCCESS'`（attendance）、`idx_events_badge_eventdate (badge_id, event_date DESC)`（audit） |
 | 實作（partition）| 按月 partition + automatic pruning |
-| 實作（MV）| `mv_daily_attendance` 預聚合 trend |
-| 驗證 | 載入 10k fixture → `EXPLAIN ANALYZE` 兩條 query |
+| 實作（MV）| `mv_daily_attendance` 預聚合（含 0105 stay_hours fix）；`QueryAttendance` 與 `QueryManagerTeamAttendance` 皆讀 MV |
+| 驗證 (1) — query plan | 載入 10k fixture → `EXPLAIN ANALYZE` 兩條 query |
 | 實測結果（attendance）| `Bitmap Index Scan on access_events_y2026m05_event_date_badge_id_idx` + `Subplans Removed: 35` + Execution Time **2.564 ms**（78× margin） |
 | 實測結果（audit）| `Bitmap Index Scan on access_events_y2026m05_badge_id_event_time_idx` + Execution Time **0.331 ms**（600× margin） |
-| 階段 | **P1 索引** + **P2 partition + MV** 全落地 |
+| 驗證 (2) — write + read 並行 | `scripts/k6-load-test/mixed_read_write.js`（swipe burst + report constant rate 同時跑）|
+| Threshold (k6) | `http_req_duration{endpoint:report} p(95)<200` 由 k6 自動斷言 |
+| 階段 | **P1 索引** + **P2 partition + MV** + **k6 持續驗證** 全落地 |
 
 ### NFR-5 DB 失效時事件不可丟
 
@@ -204,6 +209,12 @@
 | `alerts` 表 + anomaly-detector | FR-11 / HW2 §5.3 | migration `0004` + `backend/cmd/anomaly-detector/` | ✅ |
 | MQ DLQ (`pacs:events:dead`) | HW2 §5.3 Pub/Sub+DLQ | `backend/internal/queue/stream.go` | ✅ |
 | Read replica（demo 簡化）| HW2 §5.3 | docker network alias `postgres-replica` | ⚠️ demo 用 alias；正式環境換真 streaming replica |
+| `job_level` 多階主管 | FR-6/9 進化 | migration `0102`（取代 `is_manager` BOOLEAN）| ✅ |
+| Phase 1 baseline seed (1k) | HW2 §4.1 | migration `0103_seed_local` (auto) | ✅ |
+| Phase 3 cloud seed (90k) | HW2 §4.3 | `cloud_migrations/0104_cloud_seed`（手動） | ✅ 檔案就緒 |
+| stay_hours IN/OUT 累加 | FR-5 嚴謹語意 | migration `0105` 改 MV 定義 | ✅ |
+| seed-generator (Go) 動態規模 | HW2 §4 三個 Phase | `scripts/seed-generator/` `--mode local\|fab\|cloud` | ✅ |
+| k6 shift-burst 壓測 | HW2 §4.2 + spec「Shift Change spike」+ NFR-1/2/4 | `scripts/k6-load-test/*.js` + `k8s/07-k6-load-test.yaml` | ✅ |
 | HA / 99.9% (NFR-3) | HW2 §5.3 | 本機 demo 不適用 | ⏸ Phase 3 |
 | Encryption at rest (NFR-6) | HW2 §5.3 | production deployment | ⏸ infra 層 |
 

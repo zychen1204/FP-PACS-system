@@ -170,11 +170,19 @@ kubectl create configmap pacs-migration-sql \
     --from-file=scripts/migrations/ \
     --dry-run=client -o yaml | kubectl apply -f -
 
-# Load generator ConfigMap
-kubectl create configmap pacs-load-gen-source \
+# Seed generator ConfigMap（產 SQL 種子用；非壓測）
+kubectl create configmap pacs-seed-gen-source \
     --namespace=pacs \
-    --from-file=scripts/load-generator/ \
+    --from-file=scripts/seed-generator/ \
     --dry-run=client -o yaml | kubectl apply -f -
+
+# k6 壓測腳本 ConfigMap（即時 HTTP 壓測，對應 NFR-1/2）
+if [ -d "scripts/k6-load-test" ]; then
+    kubectl create configmap pacs-k6-scripts \
+        --namespace=pacs \
+        --from-file=scripts/k6-load-test/ \
+        --dry-run=client -o yaml | kubectl apply -f -
+fi
 
 echo "   ✅ Secrets & ConfigMap 建立完成"
 

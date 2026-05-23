@@ -1,24 +1,29 @@
 # 📚 PACS 文件索引 (Documentation Index)
 
-本資料夾蒐集 PACS 系統的「規範書 + 設計文件 + 實作對照 + 驗收 + 整合指引」等歷史與現行文件。
+本資料夾蒐集 PACS 系統的「規範書 + 設計文件 + 實作對照 + 驗收 + 整合指引」。
 
-## 當前重點文件
+## 現役文件（規範與驗證流程）
 
 | 文件 | 用途 |
 |---|---|
-| [實作與修復待辦事項](TodoList.md) | 列出後續預計實作的重點功能與修復項目（包含前、後端與資料庫）。 |
-| [資料模擬與測試指南](SimulationGuide.md) | 關於 1000 人大規模員工與刷卡紀錄模擬、壓力測試的詳細指引。 |
+| [系統架構](ArchitectureDesign.md) | Phase 2 完整微服務 + DB 架構圖、角色矩陣、設計理念 |
+| [實作與修復待辦事項](TodoList.md) | 後續預計實作的重點功能與修復項目（前 / 後端 / 資料庫 / K8s） |
+| [完整執行與測試流程](TestingGuide.md) | 端到端驗收劇本（含 FR-12 immutability、最小權限、ltree 主管查詢） |
+| [歷史資料模擬指南](SimulationGuide.md) | seed-generator 灌歷史 demo data（純 SQL 直灌；對應 HW2 三個 phase 規模） |
+| [即時壓力測試指南](LoadTestGuide.md) | k6 即時 HTTP 壓測（shift burst、NFR-1/2/4 threshold 驗證） |
 
-## 歷史文件 (History)
+> **seed vs k6 分工**：歷史資料用 seed-generator（一次性，SQL 直灌）；NFR threshold 驗證用 k6（即時 HTTP，自動 pass/fail）。詳見上述兩份指南開頭。
 
-先前的 Phase 2 實作與資料庫模組（Phase 1）相關的詳細設計與規範檔案，已歸檔至 `history/` 目錄中以保持根目錄整潔。
+## 歷史 / 設計脈絡文件 (`history/`)
 
-👉 **[點此查看歷史歸檔文件 (`history/`)](history/)**
+Phase 1 / Phase 2 落地時的詳細設計、實作對照、驗收歸檔。仍是 **single source of truth**（敘述版），不是棄用文件。
+
+👉 **[`history/`](history/)**
 
 包含：
-- **資料庫相關：** `database-spec.md`, `database-erd.md`, `database-compliance.md`
-- **前端相關：** `FRONTEND.md`, `FRONTEND_INTEGRATION.md`
-- **後端與整合：** `BACKEND_INTEGRATION.md`, `PHASE2_CHANGES.md`, `PHASE2_VERIFICATION.md`, `REPORT_JSON_SCHEMAS.md`
+- **資料庫：** `database-spec.md`、`database-erd.md`、`database-compliance.md`
+- **前端：** `FRONTEND.md`、`FRONTEND_INTEGRATION.md`
+- **後端與整合：** `BACKEND_INTEGRATION.md`、`PHASE2_CHANGES.md`、`PHASE2_VERIFICATION.md`、`REPORT_JSON_SCHEMAS.md`
 
 ## 命名約定
 

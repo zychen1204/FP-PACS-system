@@ -68,10 +68,26 @@
 - **`access_events`**：append-only 稽核日誌，採用不可變設計（FR-12 immutable），並按月進行 Partitioning（預建 36 個月份分區）。
 - **`employees`**：員工主檔，包含 `org_path` (中文) 與 `org_path_ltree` (GiST 索引)，並使用 `job_level` (STAFF / MANAGER_L1 / MANAGER_L2) 控制層級權限以供主管視野 (FR-6/9) 查詢。
 - **`alerts`**：FR-11 異常警報紀錄。
-- **`mv_daily_attendance`**：Materialized View，預先聚合每日的出勤資料，確保趨勢報表與主管視野的查詢效能。
+- **`mv_daily_attendance`**：Materialized View，預先聚合每日的出勤資料。`stay_hours` 自 migration `0105` 起改用 LAG window function 配對 IN→OUT 累加（FR-5「在廠停留時數」嚴謹語意，扣除午餐 / 外出時段）。
 
 ### 角色分工（最小權限原則）
 | 角色 | 權限範圍 | 使用的微服務 |
 |---|---|---|
 | `pacs_user` | `SELECT, INSERT` (觸發器與角色設定禁止 UPDATE/DELETE 以保護日誌) | `event-processor`, `anomaly-detector`, `mv-refresher`, `org-sync` |
 | `pacs_reporter` | Read Only (`SELECT` only) | `reporting-api` |
+
+## 壓測工具分工
+
+PACS 採雙工具壓測架構，避免「灌歷史」與「即時壓測」混淆：
+
+| 工具 | 角色 | 路徑 | 主要驗證 |
+|---|---|---|---|
+| **seed-generator** (`scripts/seed-generator/`) | 一次性灌歷史 demo 資料 | 直接 SQL → `psql` 灌 `access_events` | dashboard 有畫面、EXPLAIN ANALYZE 看得到 index 效益 |
+| **k6-load-test** (`scripts/k6-load-test/`) | 即時 HTTP 壓測 | `POST /v1/swipe` → access-api → Redis → Stream → event-processor | NFR-1 `p(99)<50ms`、NFR-2 `p(95)<200ms`、NFR-4 HPA 60s 擴展、spec「Shift Change spike」可視化 |
+
+兩者**不互相取代**：seed-generator 走 SQL 直灌可保留真實時間戳供報表計算，
+k6 走 HTTP 才能驗證 access-api / Redis APB / Stream / event-processor 完整鏈路效能。
+
+詳細指南：
+- [`SimulationGuide.md`](SimulationGuide.md) — seed-generator
+- [`LoadTestGuide.md`](LoadTestGuide.md) — k6 三場景
