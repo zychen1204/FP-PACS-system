@@ -45,7 +45,7 @@
 |---|---|
 | 規範 | 每筆事件含 timestamp / gate / direction；當日在廠停留時數 |
 | 實作 | `access_events` 的 `event_time / gate_id / direction` 欄位；`mv_daily_attendance` MV 預聚合（migration `0006` + `0105`）；reporting-api `QueryAttendance` 讀 MV |
-| stay_hours 演進 | 0006 baseline = `last_out - first_in` (head-tail)。**0105 fix**：改用 LAG window function 配對 IN→OUT 累加，午餐 / 外出時段不算廠內 |
+| stay_hours 演進 | 0006 baseline = `last_out - first_in` (head-tail)。**0105 fix**：改用 IN/OUT counter pairing 累加（跨午夜依 Asia/Taipei 切片），午餐 / 外出時段不算廠內 |
 | 驗證 | `curl http://localhost:8081/v1/reports/attendance` |
 | 預期 | 員工 8:00 IN / 12:00 OUT / 13:00 IN / 18:00 OUT — last_out - first_in = 10h，但 stay_hours = 9h（IN/OUT 累加扣午餐外出）|
 | 階段 | **P1 ✅** + **P2 query 改寫命中索引 + 改讀 MV** + **0105 fix stay_hours 累加** |

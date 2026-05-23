@@ -55,6 +55,58 @@ open http://localhost/
 > **Phase 3 規模（90k）**：建議跑雲端 `0104_cloud_seed`，seed-generator 在 90k 規模 SQL 檔超過 1GB。
 
 
+## 0103 — `POST /v1/swipe` 支援 `event_time` 注入
+
+刷卡 API 加了 optional `event_time` 欄位（RFC3339）給壓測 / 批次回放使用。
+留空維持原行為（server time），格式錯誤直接回 400。
+
+| 欄位 | 必填 | 範例 |
+|---|---|---|
+| `badge_id` | ✅ | `B-000123` |
+| `gate_id` | ✅ | `1-A` / `Gate-2B` |
+| `direction` | ✅ | `IN` / `OUT` |
+| `site_id` | 否（預設 `global`） | `FAB12-A` |
+| `event_time` | **否（0103 新增）** | `2026-03-15T09:00:00Z` |
+
+請求範例：
+
+```bash
+# 回放 2026-03-15 早上 9 點的 IN
+curl -X POST http://localhost:8080/v1/swipe \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "badge_id":"B-000123",
+    "site_id":"FAB12-A",
+    "gate_id":"1-A",
+    "direction":"IN",
+    "event_time":"2026-03-15T09:00:00Z"
+  }'
+```
+
+回傳：
+
+| 情境 | HTTP | `error_code` |
+|---|---|---|
+| 接受並寫進 stream | 200 | — |
+| `event_time` 不是 RFC3339 | 400 | `ERR_INVALID_EVENT_TIME` |
+| 缺 `badge_id` / `direction` / `gate_id` | 400 | `ERR_INVALID_REQUEST` |
+| 違反 APB / Tier / Cross-site | 403 | `ERR_ANTI_PASSBACK` / `ERR_TIER_VIOLATION` / `ERR_CROSS_SITE` |
+
+### 注意事項
+
+1. **時區**：handler 收到 `event_time` 後一律 normalize 成 UTC。`event_date`
+   partition key 由 `(event_time AT TIME ZONE 'Asia/Taipei')::date` 決定，
+   想灌到「Taipei 某日」就把 UTC 時間往前 8 小時。
+2. **分區範圍**：預建月份 partition 是 2025-01 ~ 2027-12；超出範圍會落入 default partition。
+3. **APB 仍會作用**：模擬時若同 badge_id 連續同向，會被 Redis state 擋下回 403。
+   壓測腳本可用以下任一策略迴避：
+   - 每次用不同 `badge_id`
+   - 交替 `IN` / `OUT`
+   - 模擬不同 `site_id` 之間切換（記得先做完一邊 IN→OUT 才能跨）
+4. **0104 大規模模擬建議用法**：load-generator 改成跑 goroutine pool 對 `POST /v1/swipe`
+   發 request，`event_time` 自己 sliding window 推算，可同時測 API 吞吐 + DB 寫入。
+
+
 ## CLI 選項
 
 ```text

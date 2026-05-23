@@ -110,7 +110,7 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, en
 		idx++
 	}
 
-	query += ` ORDER BY mv.event_date DESC, mv.badge_id`
+	query += " ORDER BY mv.event_date DESC, mv.badge_id"
 
 	rows, err := p.db.QueryContext(ctx, query, args...)
 	if err != nil {

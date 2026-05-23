@@ -22,7 +22,7 @@ scripts/
 │   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition()
 │   ├── 0102_replace_is_manager_with_job_level.{up,down}.sql    schema evolution: is_manager BOOLEAN → job_level VARCHAR + CHECK
 │   ├── 0103_seed_local.{up,down}.sql                           Phase 1 baseline seed: 1k employees (auto-run via docker compose)
-│   └── 0105_fix_stay_hours_aggregation.{up,down}.sql           FR-5 fix: stay_hours 改用 LAG window function 配對 IN→OUT 累加
+│   └── 0105_fix_stay_hours_calc.{up,down}.sql                  FR-5 fix: stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片
 ├── cloud_migrations/
 │   └── 0104_cloud_seed.{up,down}.sql                           Phase 3 seed: 90k employees (手動執行；非 auto-migrate)
 ├── fixtures/
@@ -38,11 +38,10 @@ scripts/
 ```
 
 > 註：golang-migrate 依整數版本號排序，實際執行順序為
-> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101`，
-> 因此 `0099_dev_seed` 不再是最後一支（被 0100/0101 hardening migration 接在後面）。
-> 0100/0101 是 schema-only（CREATE FUNCTION / CREATE TRIGGER / ATTACH default partition），
-> 不依賴 dev_seed 資料，跑在 dev_seed 之後完全安全。日後若想保留「dev_seed 永遠最後」
-> 的慣例，可考慮把 dev_seed 改 `9999_dev_seed.sql`。
+> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101 → 0102 → 0103 → 0105`。
+> `0099_dev_seed` 不再是最後一支（被 0100~0105 接在後面）。
+> 後續 hardening migration 都是 schema-only / additive seed，跑在 dev_seed 之後完全安全。
+> 日後若想保留「dev_seed 永遠最後」的慣例，可把它改成 `9999_dev_seed.sql`。
 
 ## Why split into separate migrations (vs. one merged file)
 
@@ -130,7 +129,7 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | `0102` | schema evolution：is_manager → job_level (多階主管) |
 | `0103` | Phase 1 baseline seed：1k 員工 + 部門結構（自動執行）|
 | `0104` | **cloud_migrations/** 的 Phase 3 90k 員工 seed（手動執行，不在 auto-migrate 路徑）|
-| `0105` | FR-5 fix：stay_hours 改 IN/OUT 累加 |
+| `0105` | FR-5 fix：stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片 |
 | `0106+` | future hardening / Phase 3 schema 改動 |
 
 ## 壓測規模 vs Phase 對照

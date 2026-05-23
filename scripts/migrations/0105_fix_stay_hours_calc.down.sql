@@ -1,8 +1,8 @@
 -- ============================================================
--- 0105 down — 還原為 0006 baseline 的 head-tail 計算
+-- 0105 down：還原成 0006 的 MV 定義（MAX(OUT) − MIN(IN) 簡單算法）。
 -- ============================================================
 
-DROP MATERIALIZED VIEW IF EXISTS mv_daily_attendance CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS mv_daily_attendance;
 
 CREATE MATERIALIZED VIEW mv_daily_attendance AS
 SELECT
@@ -26,11 +26,8 @@ WITH DATA;
 
 CREATE UNIQUE INDEX idx_mv_daily_attendance_pk
     ON mv_daily_attendance (badge_id, event_date);
-
 CREATE INDEX idx_mv_daily_attendance_org_date
     ON mv_daily_attendance USING GIST (org_path_ltree);
-
 CREATE INDEX idx_mv_daily_attendance_event_date
     ON mv_daily_attendance (event_date);
-
 GRANT SELECT ON mv_daily_attendance TO pacs_reporter;

@@ -17,17 +17,13 @@
 
 
 ## 2. 後端 (Backend)
-
-- [✅] **停留時數修正 (0105)**：~~將目前「頭尾相減」邏輯改為「當日所有廠內時間累加」~~ ✅ 已落地：
-  - `scripts/migrations/0105_fix_stay_hours_aggregation.up.sql` 用 LAG window function 配對 IN→OUT 累加重定義 `mv_daily_attendance`
-  - `backend/internal/db/postgres.go` `QueryAttendance` 同步改讀 MV（與 `QueryManagerTeamAttendance` 一致）
-  - 跨天切分目前由 `event_date` (台北時區凌晨切) 自動處理，每筆事件歸屬當地日期
-
-- [⛔] ~~**支援模擬時間戳 (0103)**~~ **【廢棄】** ~~更改後端新增支援 HTTP POST 的 `event_time` 欄位~~
-  - **廢棄理由**：原本想用 HTTP POST + 自帶 timestamp 來做歷史回放壓測，但這會在 access-api 開一個繞過 anti-passback 的後門（攻擊者可塞舊時戳規避 30s 同向檢查）。
-  - **替代方案**：
-    - 壓測 → k6（即時 HTTP，不需自帶 timestamp）：[`LoadTestGuide.md`](LoadTestGuide.md)
-    - 灌歷史資料 → seed-generator 走 SQL 直灌：[`SimulationGuide.md`](SimulationGuide.md)
+- [✅] **停留時數修正 (0105)**：migration `0105_fix_stay_hours_calc` 重建 `mv_daily_attendance`，stay_hours 改用「IN/OUT counter pairing + Asia/Taipei 00:00 切片」演算法。
+  - 同日午休（IN→OUT→IN→OUT）正確扣除休息時間
+  - 跨午夜（IN 23:00 → OUT 02:00）依 Taipei midnight 切分計入對應日期
+  - Tier-1/Tier-2 巢狀（IN1, IN2, OUT2, OUT1）視為單一 visit
+  - Orphan IN/OUT（未配對）自動丟棄
+  - `QueryAttendance` 改讀 MV，與 manager-team / trend / aggregated 同源；代價：5min eventual consistency（demo 想即時可手動 REFRESH）
+- [✅] **支援模擬時間戳 (0103)**：`POST /v1/swipe` 加 optional `event_time`（RFC3339）。空 → server time；畸形 → 400 `ERR_INVALID_EVENT_TIME`。InsertEvent 的 `event_time AT TIME ZONE 'Asia/Taipei'` 路由到對應月份 partition，事件可回放到 2025-01 ~ 2027-12 任一月。
 
 
 

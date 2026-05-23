@@ -68,7 +68,9 @@
 - **`access_events`**：append-only 稽核日誌，採用不可變設計（FR-12 immutable），並按月進行 Partitioning（預建 36 個月份分區）。
 - **`employees`**：員工主檔，包含 `org_path` (中文) 與 `org_path_ltree` (GiST 索引)，並使用 `job_level` (STAFF / MANAGER_L1 / MANAGER_L2) 控制層級權限以供主管視野 (FR-6/9) 查詢。
 - **`alerts`**：FR-11 異常警報紀錄。
-- **`mv_daily_attendance`**：Materialized View，預先聚合每日的出勤資料。`stay_hours` 自 migration `0105` 起改用 LAG window function 配對 IN→OUT 累加（FR-5「在廠停留時數」嚴謹語意，扣除午餐 / 外出時段）。
+- **`mv_daily_attendance`**：Materialized View，預先聚合每日 first_in / last_out / swipe_count / stay_hours，供趨勢報表與主管視野查詢。
+  - `stay_hours` 演算法（0105 修正）：IN/OUT counter pairing + Asia/Taipei 00:00 切片。同日多次進出（午休、會議外出）分別累加；跨午夜 visit 依日期切分到不同列；未配對 IN / OUT 自動忽略。
+  - 由獨立 `mv-refresher` service 每 5 分鐘 `REFRESH MATERIALIZED VIEW CONCURRENTLY` 一次。
 
 ### 角色分工（最小權限原則）
 | 角色 | 權限範圍 | 使用的微服務 |
