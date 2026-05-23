@@ -387,6 +387,124 @@ func TestGateTier_AllFormats(t *testing.T) {
 	}
 }
 
+// ── 0103: client-supplied event_time (load-test backfill) ──────────────────
+
+// Valid RFC3339 event_time is accepted and propagated to the published event.
+func TestHandleSwipe_EventTime_PropagatesToStream(t *testing.T) {
+	r := newTestRouter()
+	rc := redis.NewClient(&redis.Options{Addr: testRedisAddr})
+	defer func() { _ = rc.Close() }()
+	ctx := context.Background()
+
+	// 用「未來」的時間戳避開既存 stream 訊息混淆。
+	want := "2026-05-23T08:30:00Z"
+	body := bytes.NewBufferString(`{"badge_id":"ET_OK","site_id":"Site-A","gate_id":"1-A","direction":"IN","event_time":"` + want + `"}`)
+	req, _ := http.NewRequest("POST", "/v1/swipe", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status got=%d want=200; body=%s", w.Code, w.Body.String())
+	}
+
+	// 抓最後一筆 stream 訊息，解析 data，比對 timestamp 與輸入相符。
+	var got time.Time
+	for i := 0; i < 20; i++ {
+		msgs, err := rc.XRevRangeN(ctx, queue.StreamName, "+", "-", 20).Result()
+		if err == nil {
+			for _, m := range msgs {
+				data, _ := m.Values["data"].(string)
+				var ev struct {
+					BadgeID   string    `json:"badge_id"`
+					Timestamp time.Time `json:"timestamp"`
+				}
+				if json.Unmarshal([]byte(data), &ev) == nil && ev.BadgeID == "ET_OK" {
+					got = ev.Timestamp
+					break
+				}
+			}
+		}
+		if !got.IsZero() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.IsZero() {
+		t.Fatal("event with badge_id=ET_OK never appeared on stream")
+	}
+	wantTS, _ := time.Parse(time.RFC3339, want)
+	if !got.Equal(wantTS) {
+		t.Errorf("event.timestamp got=%s want=%s", got.Format(time.RFC3339), wantTS.Format(time.RFC3339))
+	}
+}
+
+// Malformed event_time must return 400 with ERR_INVALID_EVENT_TIME — never silently fall back.
+func TestHandleSwipe_EventTime_InvalidReturns400(t *testing.T) {
+	r := newTestRouter()
+	body := bytes.NewBufferString(`{"badge_id":"ET_BAD","site_id":"Site-A","gate_id":"1-A","direction":"IN","event_time":"not-a-date"}`)
+	req, _ := http.NewRequest("POST", "/v1/swipe", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status got=%d want=400", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error_code"] != "ERR_INVALID_EVENT_TIME" {
+		t.Errorf("error_code got=%q want=ERR_INVALID_EVENT_TIME", resp["error_code"])
+	}
+}
+
+// Empty event_time is allowed; handler must fall back to server time.
+func TestHandleSwipe_EventTime_EmptyFallsBackToServerTime(t *testing.T) {
+	r := newTestRouter()
+	before := time.Now().UTC().Add(-1 * time.Second)
+	body := bytes.NewBufferString(`{"badge_id":"ET_EMPTY","site_id":"Site-A","gate_id":"1-A","direction":"IN"}`)
+	req, _ := http.NewRequest("POST", "/v1/swipe", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	after := time.Now().UTC().Add(1 * time.Second)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status got=%d want=200; body=%s", w.Code, w.Body.String())
+	}
+
+	rc := redis.NewClient(&redis.Options{Addr: testRedisAddr})
+	defer func() { _ = rc.Close() }()
+	ctx := context.Background()
+
+	var got time.Time
+	for i := 0; i < 20; i++ {
+		msgs, _ := rc.XRevRangeN(ctx, queue.StreamName, "+", "-", 20).Result()
+		for _, m := range msgs {
+			data, _ := m.Values["data"].(string)
+			var ev struct {
+				BadgeID   string    `json:"badge_id"`
+				Timestamp time.Time `json:"timestamp"`
+			}
+			if json.Unmarshal([]byte(data), &ev) == nil && ev.BadgeID == "ET_EMPTY" {
+				got = ev.Timestamp
+				break
+			}
+		}
+		if !got.IsZero() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.IsZero() {
+		t.Fatal("event with badge_id=ET_EMPTY never appeared on stream")
+	}
+	if got.Before(before) || got.After(after) {
+		t.Errorf("server time fallback out of expected window: got=%s window=[%s, %s]",
+			got.Format(time.RFC3339Nano), before.Format(time.RFC3339Nano), after.Format(time.RFC3339Nano))
+	}
+}
+
 // CORS preflight should return 204
 func TestCORSPreflight_Returns204(t *testing.T) {
 	r := newTestRouter()

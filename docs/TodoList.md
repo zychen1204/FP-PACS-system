@@ -17,8 +17,13 @@
 
 
 ## 2. 後端 (Backend)
-- [ ] **停留時數修正 (0105)**：將目前「頭尾相減」邏輯改為「當日所有廠內時間累加」,跨天數則將停留時數依照00:00做切分給不同天。
-- [ ] **支援模擬時間戳 (0103)**：更改後端新增支援 HTTP POST 的`event_time` 欄位(用做模擬時間戳壓力測試)，讓資料庫組員可利用此功能生成大規模的 API HTTP 壓力測試。
+- [✅] **停留時數修正 (0105)**：migration `0105_fix_stay_hours_calc` 重建 `mv_daily_attendance`，stay_hours 改用「IN/OUT counter pairing + Asia/Taipei 00:00 切片」演算法。
+  - 同日午休（IN→OUT→IN→OUT）正確扣除休息時間
+  - 跨午夜（IN 23:00 → OUT 02:00）依 Taipei midnight 切分計入對應日期
+  - Tier-1/Tier-2 巢狀（IN1, IN2, OUT2, OUT1）視為單一 visit
+  - Orphan IN/OUT（未配對）自動丟棄
+  - `QueryAttendance` 改讀 MV，與 manager-team / trend / aggregated 同源；代價：5min eventual consistency（demo 想即時可手動 REFRESH）
+- [✅] **支援模擬時間戳 (0103)**：`POST /v1/swipe` 加 optional `event_time`（RFC3339）。空 → server time；畸形 → 400 `ERR_INVALID_EVENT_TIME`。InsertEvent 的 `event_time AT TIME ZONE 'Asia/Taipei'` 路由到對應月份 partition，事件可回放到 2025-01 ~ 2027-12 任一月。
 
 
 

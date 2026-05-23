@@ -16,19 +16,21 @@ scripts/
 │   ├── 0004_alerts_table.{up,down}.sql                         Phase 2: FR-11 alerts table (CHECK 列舉 + 索引)
 │   ├── 0005_partition_access_events.{up,down}.sql              Phase 2: access_events RANGE-partition by month (36 個月)
 │   ├── 0006_mv_daily_attendance.{up,down}.sql                  Phase 2: materialized view + UNIQUE + GiST 索引
+│   ├── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
 │   ├── 0100_protect_access_event_partitions.{up,down}.sql      Phase 2 hardening: FR-12 trigger 擴到每個子 partition
 │   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition() function
-│   └── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
+│   ├── 0102_replace_is_manager_with_job_level.{up,down}.sql    job_level enum（STAFF / MANAGER_L1 / MANAGER_L2）取代 is_manager
+│   ├── 0103_seed_local.{up,down}.sql                           本地壓測種子：1,000 階層員工（不含 access_events，事件由 load-generator 灌）
+│   └── 0105_fix_stay_hours_calc.{up,down}.sql                  Phase 2 fix：stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片
 └── fixtures/
     └── load_test.sql                                           10k events fixture for NFR-2 EXPLAIN ANALYZE
 ```
 
 > 註：golang-migrate 依整數版本號排序，實際執行順序為
-> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101`，
-> 因此 `0099_dev_seed` 不再是最後一支（被 0100/0101 hardening migration 接在後面）。
-> 0100/0101 是 schema-only（CREATE FUNCTION / CREATE TRIGGER / ATTACH default partition），
-> 不依賴 dev_seed 資料，跑在 dev_seed 之後完全安全。日後若想保留「dev_seed 永遠最後」
-> 的慣例，可考慮把 dev_seed 改 `9999_dev_seed.sql`。
+> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101 → 0102 → 0103 → 0105`。
+> `0099_dev_seed` 不再是最後一支（被 0100~0105 接在後面）。
+> 後續 hardening migration 都是 schema-only / additive seed，跑在 dev_seed 之後完全安全。
+> 日後若想保留「dev_seed 永遠最後」的慣例，可把它改成 `9999_dev_seed.sql`。
 
 ## Why split into separate migrations (vs. one merged file)
 
@@ -111,7 +113,10 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | `0099` | dev seed（only loaded in dev/demo；不再嚴格保證最後）|
 | `0100` | Phase 2 hardening：FR-12 trigger 擴到每個子 partition |
 | `0101` | Phase 2 hardening：default partition + `ensure_access_event_partition()` 預建函式 |
-| `0102+` | future hardening / Phase 3 schema 改動 |
+| `0102` | job_level enum (STAFF / MANAGER_L1 / MANAGER_L2) 取代 is_manager boolean |
+| `0103` | 本地壓測種子：1,000 階層員工（搭配 `event_time` HTTP 注入產生事件） |
+| `0105` | stay_hours 演算法修正：IN/OUT counter pairing + Asia/Taipei midnight 切片 |
+| `0106+` | future hardening / Phase 3 schema 改動 |
 
 ## Roles
 
