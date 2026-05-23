@@ -77,3 +77,19 @@
 |---|---|---|
 | `pacs_user` | `SELECT, INSERT` (觸發器與角色設定禁止 UPDATE/DELETE 以保護日誌) | `event-processor`, `anomaly-detector`, `mv-refresher`, `org-sync` |
 | `pacs_reporter` | Read Only (`SELECT` only) | `reporting-api` |
+
+## 壓測工具分工
+
+PACS 採雙工具壓測架構，避免「灌歷史」與「即時壓測」混淆：
+
+| 工具 | 角色 | 路徑 | 主要驗證 |
+|---|---|---|---|
+| **seed-generator** (`scripts/seed-generator/`) | 一次性灌歷史 demo 資料 | 直接 SQL → `psql` 灌 `access_events` | dashboard 有畫面、EXPLAIN ANALYZE 看得到 index 效益 |
+| **k6-load-test** (`scripts/k6-load-test/`) | 即時 HTTP 壓測 | `POST /v1/swipe` → access-api → Redis → Stream → event-processor | NFR-1 `p(99)<50ms`、NFR-2 `p(95)<200ms`、NFR-4 HPA 60s 擴展、spec「Shift Change spike」可視化 |
+
+兩者**不互相取代**：seed-generator 走 SQL 直灌可保留真實時間戳供報表計算，
+k6 走 HTTP 才能驗證 access-api / Redis APB / Stream / event-processor 完整鏈路效能。
+
+詳細指南：
+- [`SimulationGuide.md`](SimulationGuide.md) — seed-generator
+- [`LoadTestGuide.md`](LoadTestGuide.md) — k6 三場景

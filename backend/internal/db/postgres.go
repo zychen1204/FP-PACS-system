@@ -73,26 +73,23 @@ func (p *PostgresDB) InsertEvent(ctx context.Context, event models.AccessEvent) 
 
 // QueryAttendance returns attendance reports filtered by badge and/or date range.
 // badgeID="" returns all badges; startDate/endDate="" skips that bound.
-//
-// 0105 起改讀 mv_daily_attendance，與 manager-team / trend / aggregated 同源；
-// stay_hours 由 MV CTE 算（IN/OUT counter pairing + Asia/Taipei midnight 切片），
-// 不再在 Go 端做 LastOut − FirstIn。代價：5 分鐘 mv-refresher tick 的 eventual
-// consistency；想 demo 即時刷新可手動 `REFRESH MATERIALIZED VIEW CONCURRENTLY`。
+// Reads mv_daily_attendance — stay_hours is IN/OUT pair sum (migration 0105),
+// same MV used by QueryManagerTeamAttendance for consistency.
 func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, endDate string) ([]models.AttendanceReport, error) {
 	query := `
 		SELECT
 			mv.badge_id,
 			mv.name,
 			mv.org_path,
-			mv.event_date::text                      AS work_date,
+			mv.event_date::text AS work_date,
 			mv.first_in,
 			mv.last_out,
 			mv.swipe_count,
-			COALESCE(mv.stay_hours, 0)::float8       AS stay_hours,
-			COALESCE(emp.job_level, 'STAFF')         AS status
+			COALESCE(mv.stay_hours, 0)::float8 AS stay_hours,
+			COALESCE(emp.job_level, 'STAFF')   AS status
 		FROM mv_daily_attendance mv
 		LEFT JOIN employees emp ON mv.badge_id = emp.badge_id
-		WHERE 1 = 1
+		WHERE 1=1
 	`
 	args := []interface{}{}
 	idx := 1

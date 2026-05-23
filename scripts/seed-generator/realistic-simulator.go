@@ -1,20 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // ============================================================
-// 真實月度門禁模擬器
+// 真實月度門禁模擬器 — 產 SQL 種子用，不做 HTTP 重播
+// 壓測請改用 scripts/k6-load-test/
 // ============================================================
 
 type SwipeEvent struct {
@@ -24,13 +22,6 @@ type SwipeEvent struct {
 	Direction string
 	EventTime time.Time
 	IsAnomaly bool
-}
-
-type SwipeRequest struct {
-	BadgeID   string `json:"badge_id"`
-	SiteID    string `json:"site_id"`
-	GateID    string `json:"gate_id"`
-	Direction string `json:"direction"`
 }
 
 type DayStats struct {
@@ -80,12 +71,7 @@ func RunMonthlySimulation(cfg Config, startDate time.Time) {
 		return
 	}
 
-	// 🚀 Phase 3: API 壓力測試（預設關閉，避免 clobber 歷史資料的時間戳）
-	// fmt.Println("\n🚀 Phase 3: 開始 API 壓力測試（注意：此模式下 DB 會使用 NOW() 作為時間戳，時數會變 0.0hr）")
-	// replayEvents(events, cfg)
-	fmt.Println("\n⏩ 跳過 Phase 3 (API 壓力測試)，以確保報表時數正確。")
-
-	fmt.Println("\n📊 Phase 4: 執行報表查詢驗證...")
+	fmt.Println("\n📊 Phase 3: 執行報表查詢驗證（讀路徑健康檢查）...")
 	runReportValidation(cfg, startDate, dayMap)
 }
 
@@ -212,46 +198,6 @@ func generateSQLFile(events []SwipeEvent, filename string, cfg Config) {
 	}
 	fmt.Fprintln(f, "SET session_replication_role = 'origin';")
 	fmt.Fprintln(f, "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_attendance;")
-}
-
-func replayEvents(events []SwipeEvent, cfg Config) {
-	var success, failure int64
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, cfg.Workers)
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	start := time.Now()
-	for i, e := range events {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(evt SwipeEvent) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if sendSwipeEvent(client, cfg.AccessAPI, evt) {
-				atomic.AddInt64(&success, 1)
-			} else {
-				atomic.AddInt64(&failure, 1)
-			}
-		}(e)
-
-		if (i+1)%5000 == 0 {
-			fmt.Printf("   API 重播進度: %d/%d...\r", i+1, len(events))
-		}
-	}
-	wg.Wait()
-	fmt.Printf("\n✅ API 重播完畢，耗時 %v\n", time.Since(start))
-}
-
-func sendSwipeEvent(client *http.Client, apiBase string, evt SwipeEvent) bool {
-	reqBody, _ := json.Marshal(SwipeRequest{
-		BadgeID: evt.BadgeID, SiteID: evt.SiteID, GateID: evt.GateID, Direction: evt.Direction,
-	})
-	resp, err := client.Post(apiBase+"/v1/swipe", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == 200 || resp.StatusCode == 403
 }
 
 func buildDayMap(events []SwipeEvent, start time.Time, days int) map[string]*DayStats {

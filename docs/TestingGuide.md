@@ -14,7 +14,7 @@
 
 ```bash
 # 所有 go test 指令都必須在 backend/ 目錄下執行
-cd FP-PACS-system/backend
+cd backend
 go test ./... -count=1
 ```
 
@@ -56,7 +56,7 @@ ok  pacs/backend/internal/queue          ~2.6s
 
 ```bash
 # 在 backend/ 目錄下執行
-cd FP-PACS-system/backend
+cd backend
 
 # Access API sub-50ms SLA
 go test ./cmd/access-api/... -run TestHandleSwipe_HandlerLatency_Sub50ms -v
@@ -82,7 +82,7 @@ go test ./cmd/reporting-api/... -run "HandlerLatency" -v
 ## 二、啟動所有服務（Docker）
 
 ```bash
-cd FP-PACS-system
+cd final_project
 docker-compose up --build
 ```
 
