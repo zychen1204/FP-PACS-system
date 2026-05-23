@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-shift-burst
+  namespace: pacs
+  labels:
+    app: k6-load-test
+    scenario: shift_burst
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: k6-load-test
+        scenario: shift_burst
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: script-loader
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /scripts/lib
+          cp /config/shift_burst.js /scripts/
+          cp /config/steady_baseline.js /scripts/
+          cp /config/mixed_read_write.js /scripts/
+          cp /config/badges.js /scripts/lib/
+          cp /config/apb_safe.js /scripts/lib/
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: scripts
+          mountPath: /scripts
+      containers:
+      - name: k6
+        image: grafana/k6:0.50.0
+        args:
+        - run
+        - /scripts/shift_burst.js
+        env:
+        - name: ACCESS_API
+          value: http://access-api:8080
+        - name: REPORT_API
+          value: http://reporting-api:8081
+        - name: BADGE_COUNT
+          value: "90000"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      volumes:
+      - name: config
+        configMap:
+          name: pacs-k6-scripts
+      - name: scripts
+        emptyDir: {}

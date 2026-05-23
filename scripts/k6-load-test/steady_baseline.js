@@ -10,6 +10,8 @@ import { nextDirection } from './lib/apb_safe.js';
 
 const ACCESS_API = __ENV.ACCESS_API || 'http://localhost:8080';
 
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 299 }, 403));
+
 export const options = {
   scenarios: {
     steady: {

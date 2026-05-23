@@ -17,6 +17,8 @@ import { nextDirection } from './lib/apb_safe.js';
 const ACCESS_API = __ENV.ACCESS_API || 'http://localhost:8080';
 const REPORT_API = __ENV.REPORT_API || 'http://localhost:8081';
 
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 299 }, 401, 403));
+
 export const options = {
   scenarios: {
     swipe_burst: {

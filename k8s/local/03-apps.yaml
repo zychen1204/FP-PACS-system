@@ -1,0 +1,457 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access-api
+  namespace: pacs
+  labels:
+    app: access-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: access-api
+  template:
+    metadata:
+      labels:
+        app: access-api
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: access-api
+        image: pacs-access-api:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_PORT
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: access-api
+  namespace: pacs
+spec:
+  selector:
+    app: access-api
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-processor
+  namespace: pacs
+  labels:
+    app: event-processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-processor
+  template:
+    metadata:
+      labels:
+        app: event-processor
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: event-processor
+        image: pacs-event-processor:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8082
+          name: health
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_PORT
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: HEALTH_PORT
+          value: "8082"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-api
+  namespace: pacs
+  labels:
+    app: reporting-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reporting-api
+  template:
+    metadata:
+      labels:
+        app: reporting-api
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: reporting-api
+        image: pacs-reporting-api:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: PORT
+          value: "8081"
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: DEV_AUTH_BYPASS
+          value: "1"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: JWT_SECRET
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting-api
+  namespace: pacs
+spec:
+  selector:
+    app: reporting-api
+  ports:
+  - port: 8081
+    targetPort: 8081
+    name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-detector
+  namespace: pacs
+  labels:
+    app: anomaly-detector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: anomaly-detector
+  template:
+    metadata:
+      labels:
+        app: anomaly-detector
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: anomaly-detector
+        image: pacs-anomaly-detector:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8083
+          name: health
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: REDIS_PORT
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: HEALTH_PORT
+          value: "8083"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8083
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mv-refresher
+  namespace: pacs
+  labels:
+    app: mv-refresher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mv-refresher
+  template:
+    metadata:
+      labels:
+        app: mv-refresher
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: mv-refresher
+        image: pacs-mv-refresher:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8084
+          name: health
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: REFRESH_INTERVAL_SECONDS
+          value: "300"
+        - name: HEALTH_PORT
+          value: "8084"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8084
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: org-sync
+  namespace: pacs
+  labels:
+    app: org-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: org-sync
+  template:
+    metadata:
+      labels:
+        app: org-sync
+    spec:
+      serviceAccountName: pacs-sa
+      containers:
+      - name: org-sync
+        image: pacs-org-sync:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8085
+          name: health
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_USER
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: DB_NAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: DB_PASSWORD
+        - name: SYNC_INTERVAL_SECONDS
+          value: "1800"
+        - name: HEALTH_PORT
+          value: "8085"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8085
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: pacs
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: pacs-frontend:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: pacs
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http

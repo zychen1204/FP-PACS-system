@@ -170,6 +170,12 @@ kubectl create configmap pacs-migration-sql \
     --from-file=scripts/migrations/ \
     --dry-run=client -o yaml | kubectl apply -f -
 
+# Cloud seed SQL ConfigMap（90,000 人播種；登入 db-tools Pod 手動執行）
+kubectl create configmap pacs-cloud-seed-sql \
+    --namespace=pacs \
+    --from-file=scripts/cloud_migrations/ \
+    --dry-run=client -o yaml | kubectl apply -f -
+
 # Seed generator ConfigMap（產 SQL 種子用；非壓測）
 kubectl create configmap pacs-seed-gen-source \
     --namespace=pacs \
@@ -205,8 +211,9 @@ apply_yaml k8s/08-ingress.yaml
 apply_yaml k8s/09-network-policy.yaml
 apply_yaml k8s/10-pdb.yaml
 apply_yaml k8s/11-frontend.yaml
+apply_yaml k8s/12-db-tools.yaml
 # k8s/02-redis.yaml 不部署（GKE 使用 Memorystore）
-# k8s/07-load-tester.yaml 手動執行
+# k8s/07-k6-load-test.yaml 手動執行
 
 echo ""
 echo "⏳ 等待 Migration Job 完成（最多 3 分鐘）..."
@@ -225,11 +232,11 @@ echo "2. 取得 Ingress IP（可能需 2-3 分鐘才分配）："
 echo "   kubectl get ingress pacs-ingress -n pacs"
 echo ""
 echo "3. 雲端大規模播種（90,000 人，手動執行）："
-echo "   kubectl exec -it -n pacs deploy/access-api -c cloud-sql-proxy -- sh"
-echo "   # 或透過 Cloud SQL Auth Proxy 連接後執行："
-echo "   # psql -h 127.0.0.1 -U pacs_user -d pacs_db < scripts/cloud_migrations/0104_cloud_seed.up.sql"
+echo "   kubectl exec -it -n pacs pod/db-tools -c psql -- sh"
+echo "   psql -v ON_ERROR_STOP=1 -f /cloud-seed/0104_cloud_seed.up.sql"
 echo ""
 echo "4. 壓力測試："
-echo "   kubectl apply -f k8s/07-load-tester.yaml"
-echo "   kubectl logs -f load-tester -n pacs"
+echo "   kubectl delete job -n pacs k6-shift-burst --ignore-not-found"
+echo "   kubectl apply -f k8s/07-k6-load-test.yaml"
+echo "   kubectl logs -f -n pacs job/k6-shift-burst"
 echo ""
