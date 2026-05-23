@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: db-tools
+  namespace: pacs
+  labels:
+    app: db-tools
+spec:
+  serviceAccountName: pacs-sa
+  restartPolicy: Always
+  containers:
+  - name: psql
+    image: postgres:16-alpine
+    command:
+    - sh
+    - -c
+    - |
+      echo "db-tools ready. Run: psql -v ON_ERROR_STOP=1 -f /cloud-seed/0104_cloud_seed.up.sql"
+      trap : TERM INT
+      sleep infinity & wait
+    env:
+    - name: PGHOST
+      value: "127.0.0.1"
+    - name: PGPORT
+      valueFrom:
+        configMapKeyRef:
+          name: pacs-config
+          key: DB_PORT
+    - name: PGUSER
+      valueFrom:
+        configMapKeyRef:
+          name: pacs-config
+          key: DB_USER
+    - name: PGDATABASE
+      valueFrom:
+        configMapKeyRef:
+          name: pacs-config
+          key: DB_NAME
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: pacs-secrets
+          key: DB_PASSWORD
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "250m"
+    volumeMounts:
+    - name: cloud-seed-sql
+      mountPath: /cloud-seed
+      readOnly: true
+  - name: cloud-sql-proxy
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
+    args:
+    - "--structured-logs"
+    - "--port=5432"
+    - "$(CLOUD_SQL_INSTANCE)"
+    env:
+    - name: CLOUD_SQL_INSTANCE
+      valueFrom:
+        configMapKeyRef:
+          name: pacs-config
+          key: CLOUD_SQL_INSTANCE
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  volumes:
+  - name: cloud-seed-sql
+    configMap:
+      name: pacs-cloud-seed-sql

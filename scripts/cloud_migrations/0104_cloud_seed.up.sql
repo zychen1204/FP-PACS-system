@@ -103,10 +103,28 @@ DECLARE
     v_l2       int;
     v_staff    int;
 BEGIN
-    SELECT COUNT(*) INTO v_total  FROM employees WHERE is_active;
-    SELECT COUNT(*) INTO v_l1     FROM employees WHERE job_level = 'MANAGER_L1' AND is_active;
-    SELECT COUNT(*) INTO v_l2     FROM employees WHERE job_level = 'MANAGER_L2' AND is_active;
-    SELECT COUNT(*) INTO v_staff  FROM employees WHERE job_level = 'STAFF'      AND is_active;
+    SELECT COUNT(*) INTO v_total
+    FROM employees
+    WHERE is_active
+      AND badge_id BETWEEN 'B-000001' AND 'B-090000';
+
+    SELECT COUNT(*) INTO v_l1
+    FROM employees
+    WHERE job_level = 'MANAGER_L1'
+      AND is_active
+      AND badge_id BETWEEN 'B-000001' AND 'B-090000';
+
+    SELECT COUNT(*) INTO v_l2
+    FROM employees
+    WHERE job_level = 'MANAGER_L2'
+      AND is_active
+      AND badge_id BETWEEN 'B-000001' AND 'B-090000';
+
+    SELECT COUNT(*) INTO v_staff
+    FROM employees
+    WHERE job_level = 'STAFF'
+      AND is_active
+      AND badge_id BETWEEN 'B-000001' AND 'B-090000';
 
     RAISE NOTICE '=== 0104 雲端大規模播種結果 ===';
     RAISE NOTICE '  廠長    (L1) : %',  v_l1;
