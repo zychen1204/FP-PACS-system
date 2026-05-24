@@ -108,22 +108,6 @@ func handleSwipe(c *gin.Context) {
 		return
 	}
 
-	// 0103: 客戶端可送 event_time 覆寫 server time（壓測/批次回放歷史事件用）。
-	// 解析失敗一律回 400 — 不靜默 fallback，否則壓測會誤以為時間有生效。
-	eventTS := time.Now().UTC()
-	if req.EventTime != "" {
-		ts, err := time.Parse(time.RFC3339, req.EventTime)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, models.SwipeResponse{
-				Status:    "ERROR",
-				Message:   "event_time must be RFC3339, e.g. 2026-05-23T08:30:00Z",
-				ErrorCode: "ERR_INVALID_EVENT_TIME",
-			})
-			return
-		}
-		eventTS = ts.UTC()
-	}
-
 	ctx := c.Request.Context()
 	tier := gateTier(req.GateID)
 	siteKey := req.SiteID
@@ -153,7 +137,7 @@ func handleSwipe(c *gin.Context) {
 			if !publishSwipeEvent(c, models.AccessEvent{
 				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
 				Direction: req.Direction, Status: "REJECTED_APB",
-				Reason: reason, Timestamp: eventTS,
+				Reason: reason, Timestamp: time.Now().UTC(),
 			}) {
 				return
 			}
@@ -187,7 +171,7 @@ func handleSwipe(c *gin.Context) {
 			if !publishSwipeEvent(c, models.AccessEvent{
 				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
 				Direction: req.Direction, Status: "REJECTED_APB",
-				Reason: "未進入外層閘門", Timestamp: eventTS,
+				Reason: "未進入外層閘門", Timestamp: time.Now().UTC(),
 			}) {
 				return
 			}
@@ -217,7 +201,7 @@ func handleSwipe(c *gin.Context) {
 			if !publishSwipeEvent(c, models.AccessEvent{
 				BadgeID: req.BadgeID, SiteID: req.SiteID, GateID: req.GateID,
 				Direction: req.Direction, Status: "REJECTED_APB",
-				Reason: "請先刷出內層閘門", Timestamp: eventTS,
+				Reason: "請先刷出內層閘門", Timestamp: time.Now().UTC(),
 			}) {
 				return
 			}
@@ -250,7 +234,7 @@ func handleSwipe(c *gin.Context) {
 		SiteID:    req.SiteID,
 		GateID:    req.GateID,
 		Direction: req.Direction,
-		Timestamp: eventTS,
+		Timestamp: time.Now().UTC(),
 	}
 
 	if !allowed {
