@@ -5,62 +5,90 @@
 ## 系統架構圖
 
 ```text
-                            Badge Readers / Frontend
-                                      │
-                                      ▼
-                              ┌─────────────┐
-                              │ access-api  │   (Port 8080, 不打 DB)
-                              │  Anti-Passback│
-                              └──────┬──────┘
-                                     │
-                       ┌─────────────┼─────────────┐
-                       ▼                           ▼
-                 ┌──────────┐               ┌──────────────┐
-                 │  Redis   │               │ Redis Streams│
-                 │  Cache   │               │ pacs:events  │
-                 │  (APB)   │               └──────┬───────┘
-                 └──────────┘    (named consumer groups)
-                                                │
-                       ┌────────────────────────┼──────────────────────┐
-                       ▼                                               ▼
-              ┌────────────────┐                              ┌──────────────────┐
-              │ event-processor│                              │ anomaly-detector │
-              │   寫 access_events                            │  3 條規則 → alerts│
-              └────────┬───────┘                              └────────┬─────────┘
-                       │                                               │
-                       │  (DLQ: pacs:events:dead 在重試 3 次後)         │
-                       ▼                                               ▼
-              ┌──────────────────────────────────────────────────────────────┐
-              │              PostgreSQL 16 (append-only, 36 monthly partition)│
-              │  access_events  /  employees(org_path + org_path_ltree)       │
-              │  alerts         /  mv_daily_attendance (materialized view)    │
-              └─────────┬───────────────────────────────┬────────────────────┘
-                        │                               │
-                  ┌─────▼─────┐                  ┌──────▼──────┐
-                  │mv-refresher│                 │  org-sync   │
-                  │ 5min REFRESH│                │ LDAP→DB 同步 │
-                  └────────────┘                 └─────────────┘
-                        │
-                        ▼  (network alias: postgres-replica)
-                  ┌────────────────────┐
-                  │   reporting-api    │  (Port 8081, JWT-protected)
-                  │ /v1/reports/*      │
-                  │ /v1/audit          │
-                  │ /v1/alerts         │
-                  │ /v1/dev/login      │
-                  └────────────────────┘
+                    ┌──────────────────┐
+                    │  frontend (nginx)│  (Port 80)
+                    │  SPA / 靜態頁面   │
+                    └────────┬─────────┘
+                             │
+              Badge Readers / Browser
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+      ┌─────────────┐              ┌────────────────────┐
+      │ access-api  │ (Port 8080)  │   reporting-api    │ (Port 8081)
+      │ POST /v1/swipe             │ /v1/reports/*      │
+      │ GET /metrics│              │ /v1/reports/*/aggregated
+      │ Anti-Passback              │ /v1/audit          │
+      └──────┬──────┘              │ /v1/alerts         │
+             │                     │ /v1/dev/login      │
+  ┌──────────┼──────────┐         └────────┬───────────┘
+  ▼                     ▼                  │ (via postgres-replica alias)
+┌──────────┐     ┌──────────────┐          │
+│  Redis   │     │ Redis Streams│          │
+│  Cache   │     │ pacs:events  │          │
+│  (APB)   │     └──────┬───────┘          │
+└──────────┘  (named consumer groups)      │
+                        │                  │
+     ┌──────────────────┼────────────┐     │
+     ▼                               ▼    │
+┌────────────────┐           ┌──────────────────┐
+│ event-processor│           │ anomaly-detector │
+│  寫 access_events          │ 3 條規則 → alerts │
+└────────┬───────┘           └────────┬─────────┘
+         │                            │
+         │ (DLQ: pacs:events:dead     │
+         │  在重試 3 次後)             │
+         ▼                            ▼
+┌──────────────────────────────────────────────────────┐
+│          PostgreSQL 16-alpine (:5432)                 │
+│  access_events (append-only, 36 monthly partition)   │
+│  employees (org_path + org_path_ltree + job_level)   │
+│  alerts                                              │
+│  mv_daily_attendance (materialized view)             │
+└──────────┬───────────────────────┬───────────────────┘
+           │                       │
+     ┌─────▼──────┐         ┌──────▼──────┐
+     │mv-refresher│         │  org-sync   │
+     │ 5min REFRESH│        │ LDAP→DB 同步 │
+     │  (:8084)    │        │  (:8085)    │
+     └─────────────┘        └─────────────┘
+
+──── Observability ────────────────────────────────────
+  ┌──────────────┐        ┌──────────────┐
+  │  Prometheus  │───────▶│   Grafana    │
+  │  (:9090)     │        │  (:3000)     │
+  └──────────────┘        └──────────────┘
+        ▲
+        │ scrape /metrics
+        │
+   access-api, reporting-api
 ```
 
-## 後端微服務列表
+## 全服務列表
+
+`docker compose up -d` 啟動共 **12 個 service**（含 infra + one-shot migrate）：
+
+### 後端微服務
+
+| Service | Port | DB User | 角色 |
+|---|---|---|---|
+| `access-api` | 8080 | — (不連 DB) | 門禁寫入路徑，直接與 Redis 互動（低延遲 APB 驗證）；暴露 `GET /metrics` 供 Prometheus 抓取 |
+| `event-processor` | (8082 health) | `pacs_user` | 消費 Stream 並持久化寫入 `access_events` 表格 |
+| `reporting-api` | 8081 | `pacs_reporter` | 報表（含 aggregated）、稽核軌跡、警報、Excel 匯出、JWT 簽發 |
+| `anomaly-detector` | (8083 health) | `pacs_user` | 規則引擎（OFF_HOURS_ENTRY / APB_BURST / TAILGATING），訂閱 Stream 寫 `alerts` |
+| `mv-refresher` | (8084 health) | `pacs_user` | 每 5 分鐘 `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_attendance` |
+| `org-sync` | (8085 health) | `pacs_user` | 模擬 LDAP / AD → UPSERT `employees` |
+
+### 基礎設施
 
 | Service | Port | 角色 |
 |---|---|---|
-| `access-api` | 8080 | 門禁寫入路徑，直接與 Redis 互動（低延遲防跟隨驗證），不打 DB |
-| `event-processor` | (8082 health) | 消費 Stream 並持久化寫入 `access_events` 表格 |
-| `reporting-api` | 8081 | 提供報表、警報、資料匯出查詢，以及 JWT 簽發 |
-| `anomaly-detector` | (8083 health) | 規則引擎，訂閱 Stream 並判斷異常行為，寫入 `alerts` |
-| `mv-refresher` | (8084 health) | 每 5 分鐘執行 `REFRESH MATERIALIZED VIEW CONCURRENTLY` 加速報表 |
-| `org-sync` | (8085 health) | 模擬與 LDAP / AD 系統同步，更新 `employees` |
+| `postgres` | 5432 | PostgreSQL 16-alpine，network alias `postgres-replica` 供 reporting-api 讀 |
+| `redis` | 6379 | Redis 7-alpine，APB state cache + Streams `pacs:events` |
+| `migrate` | (one-shot) | golang-migrate，啟動時跑 `scripts/migrations/` 0001~0105 |
+| `frontend` | 80 | nginx，serve SPA 靜態頁面（刷卡模擬、出勤報表、趨勢分析） |
+| `prometheus` | 9090 | 抓取 access-api `/metrics`、各 service health |
+| `grafana` | 3000 | 視覺化 dashboard（admin/admin），接 Prometheus 資料源 |
 
 ## 資料庫架構與設計理念
 
