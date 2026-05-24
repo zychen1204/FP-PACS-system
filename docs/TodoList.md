@@ -23,7 +23,7 @@
   - Tier-1/Tier-2 巢狀（IN1, IN2, OUT2, OUT1）視為單一 visit
   - Orphan IN/OUT（未配對）自動丟棄
   - `QueryAttendance` 改讀 MV，與 manager-team / trend / aggregated 同源；代價：5min eventual consistency（demo 想即時可手動 REFRESH）
-- [✅] **支援模擬時間戳 (0103)**：`POST /v1/swipe` 加 optional `event_time`（RFC3339）。空 → server time；畸形 → 400 `ERR_INVALID_EVENT_TIME`。InsertEvent 的 `event_time AT TIME ZONE 'Asia/Taipei'` 路由到對應月份 partition，事件可回放到 2025-01 ~ 2027-12 任一月。
+- [❌] **~~支援模擬時間戳 (0103)~~**：主動放棄 — 接受 client 端時間戳會破壞 audit trail 可信度（見 PR #16 RexLeee 評估）。壓測改用 k6 即時 HTTP + seed-generator SQL 直灌。
 
 
 

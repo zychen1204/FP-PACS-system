@@ -8,10 +8,6 @@ type SwipeRequest struct {
 	SiteID    string `json:"site_id"` // optional, forwarded from frontend for DB storage
 	GateID    string `json:"gate_id" binding:"required"`
 	Direction string `json:"direction" binding:"required,oneof=IN OUT"`
-	// EventTime: 可選 RFC3339 時間戳，留空則 handler 用 server time。
-	// 用於 0104 大規模壓測 / 批次回放生成歷史事件；以 string 保留，handler 解析失敗
-	// 回 400，避免 binding 把畸形 payload 默默灌成 time.Time 零值寫進 DB。
-	EventTime string `json:"event_time,omitempty"`
 }
 
 // SwipeResponse represents the response to a swipe request
