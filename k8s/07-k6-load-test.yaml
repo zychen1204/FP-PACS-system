@@ -40,16 +40,14 @@ spec:
       - name: scripts
         configMap:
           name: pacs-k6-scripts
----
-# ConfigMap 由 deploy-to-gke.sh 自動填入 scripts/k6-load-test/ 的內容；
-# 本機可手動建立：
-#   kubectl create configmap pacs-k6-scripts -n pacs \
-#     --from-file=scripts/k6-load-test/ \
-#     --dry-run=client -o yaml | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: pacs-k6-scripts
-  namespace: pacs
-data:
-  placeholder: "run deploy-to-gke.sh or kubectl create configmap"
+          items:
+          - key: shift_burst.js
+            path: shift_burst.js
+          - key: steady_baseline.js
+            path: steady_baseline.js
+          - key: mixed_read_write.js
+            path: mixed_read_write.js
+          - key: badges.js
+            path: lib/badges.js
+          - key: apb_safe.js
+            path: lib/apb_safe.js
