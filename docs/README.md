@@ -11,6 +11,7 @@
 | [完整執行與測試流程](TestingGuide.md) | 端到端驗收劇本（含 FR-12 immutability、最小權限、ltree 主管查詢） |
 | [歷史資料模擬指南](SimulationGuide.md) | seed-generator 灌歷史 demo data（純 SQL 直灌；對應 HW2 三個 phase 規模） |
 | [即時壓力測試指南](LoadTestGuide.md) | k6 即時 HTTP 壓測（shift burst、NFR-1/2/4 threshold 驗證） |
+| [GKE 上雲部署報告](GKEDeploymentReport.md) | GKE/Cloud SQL/Memorystore 上雲架構、部署決策、驗證結果與關閉資源方式 |
 
 > **seed vs k6 分工**：歷史資料用 seed-generator（一次性，SQL 直灌）；NFR threshold 驗證用 k6（即時 HTTP，自動 pass/fail）。詳見上述兩份指南開頭。
 

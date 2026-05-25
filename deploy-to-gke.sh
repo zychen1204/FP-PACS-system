@@ -6,8 +6,9 @@
 #   ./deploy-to-gke.sh <PROJECT_ID> [REGION] [CLUSTER_NAME]
 #
 # 前置條件：
-#   - gcloud auth login && gcloud auth configure-docker
-#   - 已啟用 API：container, sqladmin, redis, iam, cloudbuild
+#   - gcloud auth login
+#   - Docker daemon 已啟動
+#   - 專案 Billing 已啟用
 # ============================================================
 
 set -euo pipefail
@@ -18,8 +19,17 @@ REGION=${2:-asia-east1}
 CLUSTER_NAME=${3:-pacs-cluster}
 DB_INSTANCE_NAME=${4:-pacs-pg16}
 REDIS_NAME=${5:-pacs-redis}
+DB_EDITION=${DB_EDITION:-ENTERPRISE}
+DB_TIER=${DB_TIER:-db-custom-2-7680}
+GKE_NUM_NODES=${GKE_NUM_NODES:-1}
+GKE_MIN_NODES=${GKE_MIN_NODES:-1}
+GKE_MAX_NODES=${GKE_MAX_NODES:-3}
+GKE_MACHINE_TYPE=${GKE_MACHINE_TYPE:-e2-standard-2}
+GKE_DISK_TYPE=${GKE_DISK_TYPE:-pd-standard}
+GKE_DISK_SIZE=${GKE_DISK_SIZE:-30}
 DB_PASSWORD=${DB_PASSWORD:-$(openssl rand -base64 16)}
 JWT_SECRET=${JWT_SECRET:-$(openssl rand -base64 32)}
+BUILD_IMAGES=${BUILD_IMAGES:-1}
 
 if [ -z "$PROJECT_ID" ]; then
     echo "❌ 用法：$0 <PROJECT_ID> [REGION] [CLUSTER_NAME]"
@@ -32,9 +42,24 @@ echo "╠═══════════════════════�
 echo "║ 專案  : $PROJECT_ID"
 echo "║ 區域  : $REGION"
 echo "║ 叢集  : $CLUSTER_NAME"
+echo "║ 節點  : ${GKE_NUM_NODES}/zone, ${GKE_MACHINE_TYPE}, ${GKE_DISK_SIZE}GB ${GKE_DISK_TYPE}"
 echo "╚════════════════════════════════════════════════════════╝"
 
 gcloud config set project "$PROJECT_ID"
+
+# ── 0. 必要 API ────────────────────────────────────────────────
+echo ""
+echo "🔧 [0/7] 啟用必要 Google Cloud APIs..."
+gcloud services enable \
+    container.googleapis.com \
+    sqladmin.googleapis.com \
+    redis.googleapis.com \
+    iam.googleapis.com \
+    cloudbuild.googleapis.com \
+    containerregistry.googleapis.com \
+    serviceusage.googleapis.com \
+    --project="$PROJECT_ID"
+echo "   ✅ APIs 已啟用或原本已啟用"
 
 # ── 1. GKE 叢集 ───────────────────────────────────────────────
 echo ""
@@ -42,11 +67,13 @@ echo "📦 [1/7] 確保 GKE 叢集存在..."
 if ! gcloud container clusters describe "$CLUSTER_NAME" --region="$REGION" &>/dev/null; then
     gcloud container clusters create "$CLUSTER_NAME" \
         --region="$REGION" \
-        --num-nodes=2 \
-        --machine-type=e2-standard-2 \
+        --num-nodes="$GKE_NUM_NODES" \
+        --machine-type="$GKE_MACHINE_TYPE" \
+        --disk-type="$GKE_DISK_TYPE" \
+        --disk-size="$GKE_DISK_SIZE" \
         --enable-autoscaling \
-        --min-nodes=2 \
-        --max-nodes=6 \
+        --min-nodes="$GKE_MIN_NODES" \
+        --max-nodes="$GKE_MAX_NODES" \
         --workload-pool="$PROJECT_ID.svc.id.goog"
     echo "   ✅ 叢集建立完成"
 else
@@ -63,7 +90,8 @@ echo "📦 [2/7] 確保 Cloud SQL PostgreSQL 16 存在..."
 if ! gcloud sql instances describe "$DB_INSTANCE_NAME" &>/dev/null; then
     gcloud sql instances create "$DB_INSTANCE_NAME" \
         --database-version=POSTGRES_16 \
-        --tier=db-custom-2-7680 \
+        --edition="$DB_EDITION" \
+        --tier="$DB_TIER" \
         --region="$REGION"
     echo "   ✅ SQL 實例建立完成"
 else
@@ -122,22 +150,28 @@ kubectl annotate serviceaccount pacs-sa \
 # ── 5. Docker Build & Push ─────────────────────────────────────
 echo ""
 echo "🐳 [5/7] 建立並推送 Docker Images..."
-gcloud auth configure-docker --quiet
+if [ "$BUILD_IMAGES" = "1" ]; then
+    export DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/pacs-docker-config}
+    mkdir -p "$DOCKER_CONFIG"
+    gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io >/dev/null
 
-BACKEND_SERVICES=("access-api" "event-processor" "reporting-api" "anomaly-detector" "mv-refresher" "org-sync")
-for svc in "${BACKEND_SERVICES[@]}"; do
-    echo "   building pacs-$svc ..."
-    docker build \
-        --build-arg SERVICE="$svc" \
-        -t "gcr.io/$PROJECT_ID/pacs-$svc:latest" \
-        ./backend
-    docker push "gcr.io/$PROJECT_ID/pacs-$svc:latest"
-done
+    BACKEND_SERVICES=("access-api" "event-processor" "reporting-api" "anomaly-detector" "mv-refresher" "org-sync")
+    for svc in "${BACKEND_SERVICES[@]}"; do
+        echo "   building pacs-$svc ..."
+        docker build \
+            --build-arg SERVICE="$svc" \
+            -t "gcr.io/$PROJECT_ID/pacs-$svc:latest" \
+            ./backend
+        docker push "gcr.io/$PROJECT_ID/pacs-$svc:latest"
+    done
 
-echo "   building pacs-frontend ..."
-docker build -t "gcr.io/$PROJECT_ID/pacs-frontend:latest" ./frontend
-docker push "gcr.io/$PROJECT_ID/pacs-frontend:latest"
-echo "   ✅ 所有 Images 推送完成"
+    echo "   building pacs-frontend ..."
+    docker build -t "gcr.io/$PROJECT_ID/pacs-frontend:latest" ./frontend
+    docker push "gcr.io/$PROJECT_ID/pacs-frontend:latest"
+    echo "   ✅ 所有 Images 推送完成"
+else
+    echo "   ⏭️  BUILD_IMAGES=0，略過 Docker build/push"
+fi
 
 # ── 6. Secrets & ConfigMap ────────────────────────────────────
 echo ""
@@ -179,7 +213,9 @@ kubectl create configmap pacs-cloud-seed-sql \
 # Seed generator ConfigMap（產 SQL 種子用；非壓測）
 kubectl create configmap pacs-seed-gen-source \
     --namespace=pacs \
-    --from-file=scripts/seed-generator/ \
+    --from-file=scripts/seed-generator/main.go \
+    --from-file=scripts/seed-generator/realistic-simulator.go \
+    --from-file=scripts/seed-generator/go.mod \
     --dry-run=client -o yaml | kubectl apply -f -
 
 # k6 壓測腳本 ConfigMap（即時 HTTP 壓測，對應 NFR-1/2）
@@ -187,6 +223,7 @@ if [ -d "scripts/k6-load-test" ]; then
     kubectl create configmap pacs-k6-scripts \
         --namespace=pacs \
         --from-file=scripts/k6-load-test/ \
+        --from-file=scripts/k6-load-test/lib/ \
         --dry-run=client -o yaml | kubectl apply -f -
 fi
 

@@ -48,6 +48,36 @@ spec:
           mountPath: /sql-source
         - name: migration-files
           mountPath: /migrations
+      # native sidecar：先啟動 Cloud SQL Proxy，startupProbe 通過後才跑 migrate
+      - name: cloud-sql-proxy
+        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
+        restartPolicy: Always
+        args:
+        - "--structured-logs"
+        - "--address=0.0.0.0"
+        - "--port=5432"
+        - "$(CLOUD_SQL_INSTANCE)"
+        env:
+        - name: CLOUD_SQL_INSTANCE
+          valueFrom:
+            configMapKeyRef:
+              name: pacs-config
+              key: CLOUD_SQL_INSTANCE
+        startupProbe:
+          tcpSocket:
+            port: 5432
+          periodSeconds: 1
+          failureThreshold: 60
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
       containers:
       - name: migrate
         image: migrate/migrate:v4.17.1
@@ -55,8 +85,8 @@ spec:
         - migrate
         - -path=/migrations
         - -database=postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable
-        - up
-        - "102"           # 只跑到 0102；0103 大規模 seed 手動執行
+        - goto
+        - "102"           # 只跑到 version 0102；0103+ seed 手動執行
         env:
         - name: DB_USER
           valueFrom:
@@ -90,49 +120,9 @@ spec:
         volumeMounts:
         - name: migration-files
           mountPath: /migrations
-      # ── Cloud SQL Proxy Sidecar ──────────────────────────
-      - name: cloud-sql-proxy
-        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
-        args:
-        - "--structured-logs"
-        - "--port=5432"
-        - "$(CLOUD_SQL_INSTANCE)"
-        env:
-        - name: CLOUD_SQL_INSTANCE
-          valueFrom:
-            configMapKeyRef:
-              name: pacs-config
-              key: CLOUD_SQL_INSTANCE
-        securityContext:
-          runAsNonRoot: true
-          allowPrivilegeEscalation: false
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-          limits:
-            memory: "128Mi"
-            cpu: "100m"
       volumes:
       - name: sql-source
         configMap:
           name: pacs-migration-sql
       - name: migration-files
         emptyDir: {}
----
-# ── SQL ConfigMap（含實際 migration 檔案）────────────────────
-# 由 deploy-to-gke.sh 動態建立（從 scripts/migrations/ 讀入）
-# 這裡只是結構說明，實際內容由 kustomize 或 deploy script 填入
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: pacs-migration-sql
-  namespace: pacs
-  annotations:
-    note: "此 ConfigMap 由 deploy-to-gke.sh 自動填入 SQL 內容"
-data:
-  # 由 deploy-to-gke.sh 執行以下命令填入：
-  # kubectl create configmap pacs-migration-sql \
-  #   --from-file=scripts/migrations/ \
-  #   -n pacs --dry-run=client -o yaml | kubectl apply -f -
-  placeholder: "run deploy-to-gke.sh to populate"
