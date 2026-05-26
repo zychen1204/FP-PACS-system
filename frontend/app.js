@@ -888,16 +888,31 @@ function reRenderOrgChart() {
 }
 
 // ── Alerts ────────────────────────────────────
+// ── Alerts ────────────────────────────────────
 async function fetchAlerts() {
     const severity = document.getElementById('alert-severity')?.value;
     try {
-        let url=`${getReportUrl()}/v1/alerts`;
-        if (severity) url+=`?severity=${severity}`;
-        const response=await fetch(url);
-        const data=await response.json();
-        if (!response.ok) throw new Error(data.error||'查詢失敗');
+        // 1. 確保有取得有效的 Token 認證
+        const authHeaders = await ensureReportAuth().catch(() => null);
+        
+        let url = `${getReportUrl()}/v1/alerts`;
+        if (severity) url += `?severity=${severity}`;
+        
+        // 2. 在 fetch 請求中加入 Headers
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(authHeaders || (state.token ? { 'Authorization': `Bearer ${state.token}` } : {}))
+            }
+        });
+        
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '查詢失敗');
         displayAlerts(data);
-    } catch (error) { alert('警報查詢失敗: '+error.message); }
+    } catch (error) { 
+        alert('警報查詢失敗: ' + error.message); 
+    }
 }
 
 function displayAlerts(alerts) {
