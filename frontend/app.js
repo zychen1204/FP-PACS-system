@@ -3,16 +3,31 @@
 // (logic unchanged; chart colours updated for light theme)
 // ============================================
 
+// State Management
 const state = {
-    apiUrl:    localStorage.getItem('apiUrl')    || 'http://localhost:8080',
-    reportUrl: localStorage.getItem('reportUrl') || 'http://localhost:8081',
-    token:     localStorage.getItem('pacs_token') || null,
-    currentBadge: localStorage.getItem('current_badge') || 'B001',
+    // API URLs
+    apiUrl: localStorage.getItem('apiUrl') || '',
+    reportUrl: localStorage.getItem('reportUrl') || '',
+    
+    // Auth
+    token: localStorage.getItem('pacs_token') || null,
+    currentBadge: localStorage.getItem('current_badge') || 'B-000001',
+    
+    // Data
     swipeHistory: JSON.parse(localStorage.getItem('swipeHistory')) || [],
-    trendChart: null, modalChart: null,
-    modalTrendData: null, modalPersonalData: null,
-    modalBadge: null, modalScope: null, modalOrgPeriod: null,
-    selectedTier: 'outer', selectedDirection: 'IN',
+    trendChart: null,
+    modalChart: null,
+    modalTrendData: null,
+    modalPersonalData: null,
+    modalBadge: null,
+    modalScope: null,
+    modalOrgPeriod: null,
+    
+    // UI State
+    selectedTier: 'outer',
+    selectedDirection: 'IN',
+    
+    // Server status
     serverOnline: false
 };
 
@@ -37,6 +52,7 @@ function getRoleBadge(report) {
 document.addEventListener('DOMContentLoaded', () => { initializeApp(); });
 
 function initializeApp() {
+    sanitizeApiSettings();
     setupEventListeners();
     restoreSettings();
     testServerConnection();
@@ -57,6 +73,7 @@ function setupEventListeners() {
     document.getElementById('btn-org-trend')?.addEventListener('click', showOrgTrend);
     document.querySelectorAll('.period-btn').forEach(btn => btn.addEventListener('click', selectPeriod));
 
+    // Trend Modal
     document.getElementById('btn-close-trend-modal')?.addEventListener('click', closeTrendModal);
     document.getElementById('trend-modal')?.addEventListener('click', e => {
         if (e.target.id === 'trend-modal') closeTrendModal();
@@ -107,7 +124,7 @@ function selectTier(e) {
             <option value="Gate-2A">Gate-2A（內層）</option>
             <option value="Gate-2B">Gate-2B（內層）</option>
             <option value="Gate-2C">Gate-2C（內層）</option>
-        `;
+            `;
     }
 }
 
@@ -120,11 +137,113 @@ function selectDirection(e) {
     state.selectedDirection = direction;
 }
 
-// ── API helpers ───────────────────────────────
-function getApiUrl()    { return state.apiUrl    || window.location.origin; }
-function getReportUrl() { return state.reportUrl || window.location.origin; }
+// ============ API URL HELPERS ============
+function isLocalHostname(hostname) {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
 
-// ── Swipe ─────────────────────────────────────
+function normalizeApiUrl(url) {
+    if (!url) return window.location.origin;
+
+    try {
+        const parsed = new URL(url, window.location.origin);
+        const localApiHost = isLocalHostname(parsed.hostname);
+        const localPageHost = isLocalHostname(window.location.hostname);
+        const cloudPageHost = window.location.protocol.startsWith('http') && !localPageHost;
+
+        if (cloudPageHost && (localApiHost || parsed.hostname === window.location.hostname)) {
+            return window.location.origin;
+        }
+
+        if (window.location.protocol === 'https:' && parsed.protocol === 'http:') {
+            return window.location.origin;
+        }
+
+        return parsed.toString().replace(/\/$/, '');
+    } catch (_) {
+        return window.location.origin;
+    }
+}
+
+function getApiUrl() {
+    return normalizeApiUrl(state.apiUrl);
+}
+function getReportUrl() {
+    return normalizeApiUrl(state.reportUrl);
+}
+
+function getAccessHealthUrl() {
+    return `${window.location.origin}/api/healthz`;
+}
+
+function getReportHealthUrl() {
+    return `${window.location.origin}/api/report-healthz`;
+}
+
+function sanitizeApiUrlForStorage(url) {
+    if (!url) return '';
+    const normalized = normalizeApiUrl(url);
+    return normalized === window.location.origin ? '' : normalized;
+}
+
+function sanitizeApiSettings() {
+    const sanitizedApiUrl = sanitizeApiUrlForStorage(state.apiUrl);
+    const sanitizedReportUrl = sanitizeApiUrlForStorage(state.reportUrl);
+
+    state.apiUrl = sanitizedApiUrl;
+    state.reportUrl = sanitizedReportUrl;
+
+    if (sanitizedApiUrl) {
+        localStorage.setItem('apiUrl', sanitizedApiUrl);
+    } else {
+        localStorage.removeItem('apiUrl');
+    }
+
+    if (sanitizedReportUrl) {
+        localStorage.setItem('reportUrl', sanitizedReportUrl);
+    } else {
+        localStorage.removeItem('reportUrl');
+    }
+}
+
+async function ensureReportAuth(badgeId = state.currentBadge) {
+    const badge = badgeId || state.currentBadge || 'B-000001';
+
+    if (state.token && state.currentBadge === badge && isJwtUsable(state.token)) {
+        return { Authorization: `Bearer ${state.token}` };
+    }
+
+    const response = await fetch(`${getReportUrl()}/v1/dev/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ badge_id: badge })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '登入失敗，無法查詢報表');
+
+    state.token = data.access_token;
+    state.currentBadge = badge;
+    localStorage.setItem('pacs_token', data.access_token);
+    localStorage.setItem('current_badge', badge);
+
+    return { Authorization: `Bearer ${state.token}` };
+}
+
+function isJwtUsable(token) {
+    try {
+        const encodedPayload = token.split('.')[1]
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+        const paddedPayload = encodedPayload.padEnd(encodedPayload.length + (4 - encodedPayload.length % 4) % 4, '=');
+        const payload = JSON.parse(atob(paddedPayload));
+        if (!payload.exp) return true;
+        return payload.exp > Math.floor(Date.now() / 1000) + 60;
+    } catch (_) {
+        return false;
+    }
+}
+
+// ============ SWIPE REQUEST ============
 async function sendSwipe() {
     const badgeId = document.getElementById('badge-id')?.value?.trim();
     const siteId  = document.getElementById('site-id')?.value || 'Fab12';
@@ -149,14 +268,14 @@ function displaySwipeResponse(status, data, payload) {
     const successDiv = document.getElementById('swipe-success');
     const failDiv    = document.getElementById('swipe-fail');
     if (!idleDiv || !successDiv || !failDiv) return;
-
+    
     idleDiv.classList.add('hidden');
     successDiv.classList.add('hidden');
     failDiv.classList.add('hidden');
-
+    
     const isSuccess    = status === 200 && data.status === 'SUCCESS';
     const directionText = payload?.direction === 'IN' ? '進入' : '離開';
-
+    
     if (isSuccess) {
         successDiv.classList.remove('hidden');
         document.getElementById('swipe-success-msg').textContent =
@@ -176,47 +295,65 @@ function displaySwipeResponse(status, data, payload) {
 
 // ── Settings ──────────────────────────────────
 function saveSettings() {
-    const apiUrl    = document.getElementById('api-url').value.trim();
-    const reportUrl = document.getElementById('report-url').value.trim();
-    state.apiUrl    = apiUrl;
+    const apiUrl = sanitizeApiUrlForStorage(document.getElementById('api-url')?.value?.trim() || '');
+    const reportUrl = sanitizeApiUrlForStorage(document.getElementById('report-url')?.value?.trim() || '');
+
+    state.apiUrl = apiUrl;
     state.reportUrl = reportUrl;
-    localStorage.setItem('apiUrl',    apiUrl);
-    localStorage.setItem('reportUrl', reportUrl);
+
+    if (apiUrl) {
+        localStorage.setItem('apiUrl', apiUrl);
+    } else {
+        localStorage.removeItem('apiUrl');
+    }
+
+    if (reportUrl) {
+        localStorage.setItem('reportUrl', reportUrl);
+    } else {
+        localStorage.removeItem('reportUrl');
+    }
+
     alert('設定已儲存');
+    restoreSettings();
 }
 
 function restoreSettings() {
-    const apiEl    = document.getElementById('api-url');
-    const reportEl = document.getElementById('report-url');
-    if (apiEl)    apiEl.value    = state.apiUrl;
-    if (reportEl) reportEl.value = state.reportUrl;
+    const apiUrlInput = document.getElementById('api-url');
+    const reportUrlInput = document.getElementById('report-url');
+
+    if (apiUrlInput) apiUrlInput.value = state.apiUrl;
+    if (reportUrlInput) reportUrlInput.value = state.reportUrl;
 }
 
-// ── Connection test ───────────────────────────
+// ============ CONNECTION TEST ============
 async function testServerConnection() {
-    const connectionResult  = document.getElementById('connection-result');
+    const connectionResult = document.getElementById('connection-result');
     const connectionContent = document.getElementById('connection-content');
-    if (!connectionResult || !connectionContent) return;
 
-    connectionResult.style.display = 'block';
-    connectionResult.classList.remove('success', 'error');
-    connectionContent.textContent = '連線測試中…';
+    connectionResult?.classList.remove('hidden', 'success', 'error');
 
     try {
-        const accessTest  = await fetch(`${getApiUrl()}/healthz`,    { method: 'GET' }).then(r => r.ok).catch(() => false);
-        const reportTest  = await fetch(`${getReportUrl()}/healthz`,  { method: 'GET' }).then(r => r.ok).catch(() => false);
+        const accessTest = await fetch(getAccessHealthUrl(), { method: 'GET' })
+            .then(r => r.ok).catch(() => false);
+        const reportTest = await fetch(getReportHealthUrl(), { method: 'GET' })
+            .then(r => r.ok).catch(() => false);
+
         const accessStatus = accessTest ? '✓ 連線成功' : '✗ 無法連接';
         const reportStatus = reportTest ? '✓ 連線成功' : '✗ 無法連接';
-        connectionResult.classList.add(accessTest && reportTest ? 'success' : 'error');
-        connectionContent.innerHTML = `
+
+        connectionResult?.classList.add(accessTest && reportTest ? 'success' : 'error');
+
+        if (connectionContent) connectionContent.innerHTML = `
             <strong>Access API (Port 8080):</strong> ${accessStatus}<br>
-            <strong>Reporting API (Port 8081):</strong> ${reportStatus}<br>
-            <small style="color:var(--muted);">透過 Nginx 反向代理連接後端微服務</small>
+            <strong>Reporting API (Port 8081):</strong> ${reportStatus}<br><br>
+            <small>透過 Nginx 反向代理連接後端微服務</small>
         `;
+
         updateServerStatus(accessTest && reportTest);
+
     } catch (error) {
-        connectionResult.classList.add('error');
-        connectionContent.innerHTML = `<strong>連線測試失敗:</strong> ${error.message}`;
+        connectionResult?.classList.add('error');
+        if (connectionContent) connectionContent.innerHTML = `<strong>❌ 連線測試失敗:</strong> ${error.message}`;
         updateServerStatus(false);
     }
 }
@@ -224,6 +361,7 @@ async function testServerConnection() {
 function updateServerStatus(online) {
     const indicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
+
     if (!indicator || !statusText) return;
     indicator.classList.remove('online', 'offline');
     indicator.classList.add(online ? 'online' : 'offline');
@@ -239,14 +377,14 @@ function initYearSelects() {
         document.getElementById('attendance-month-year'),  // ← 新增這行
     ];
     targets.forEach(sel => {
-        if (!sel) return;
+    if (!sel) return;
         sel.innerHTML = '';
-        for (let y = thisYear; y >= thisYear - 5; y--) {
-            const opt = document.createElement('option');
-            opt.value = y;
-            opt.textContent = y + ' 年';
-            sel.appendChild(opt);
-        }
+    for (let y = thisYear; y >= thisYear - 5; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + ' 年';
+        sel.appendChild(opt);
+    }
     });
 }
 
@@ -508,11 +646,11 @@ async function exportAttendanceExcel() {
         
         // 延遲釋放記憶體，避免下載被瀏覽器提早中斷
         setTimeout(() => {
-            URL.revokeObjectURL(downloadUrl);
+        URL.revokeObjectURL(downloadUrl);
         }, 250);
 
-    } catch (error) { 
-        alert('匯出失敗: ' + error.message); 
+    } catch (error) {
+        alert('匯出失敗: ' + error.message);
     }
 }
 
@@ -618,7 +756,7 @@ function showPersonalTrendModal(employeeId, name) {
             const dailyData=(Array.isArray(data)?data:[]).filter(r=>r.employee_id===employeeId).sort((a,b)=>a.work_date.localeCompare(b.work_date));
             if (!dailyData.length) { setModalContent('<p class="modal-loading">無資料</p>'); return; }
             state.modalPersonalData=dailyData;
-            setModalContent(chartHtml);
+                setModalContent(chartHtml);
             requestAnimationFrame(()=>reRenderPersonalChart());
         }).catch(err=>setModalContent(`<div class="error-inline">錯誤：${err.message}</div>`));
     }
@@ -742,11 +880,11 @@ function reRenderOrgChart() {
             y: { ...chartDefaults().scales.y, title:{ display:true, text:cfg.yTitle, color:CHART_OPTS.mutedColor, font:{size:11} } }
         }
     };
-    state.modalChart = new Chart(ctx, {
+        state.modalChart = new Chart(ctx, {
         type:'line',
         data:{ labels, datasets:[{ label:cfg.label, data, borderColor:cfg.color, backgroundColor:cfg.color+'18', tension:.4, fill:true, pointRadius:3, borderWidth:1.5 }] },
         options: opts
-    });
+        });
 }
 
 // ── Alerts ────────────────────────────────────
