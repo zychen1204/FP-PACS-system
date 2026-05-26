@@ -1,6 +1,6 @@
 // ============================================
 // PACS Frontend — app.js
-// (logic unchanged; chart colours updated for light theme)
+// (fixed: missing authorization headers in reporting APIs)
 // ============================================
 
 // State Management
@@ -374,7 +374,7 @@ function initYearSelects() {
     const targets = [
         document.getElementById('attendance-quarter-year'),
         document.getElementById('attendance-year'),
-        document.getElementById('attendance-month-year'),  // ← 新增這行
+        document.getElementById('attendance-month-year'),
     ];
     targets.forEach(sel => {
     if (!sel) return;
@@ -432,7 +432,7 @@ function getPeriodDateRange() {
     return { period, startDate, endDate };
 }
 
-// ── Attendance ────────────────────────────────
+// ── Attendance [FIXED: Added ensureReportAuth to inject headers] ──
 async function fetchAttendance() {
     const employeeId = document.getElementById('attendance-employee-id')?.value?.trim();
     const mode = document.querySelector('input[name="attendance-mode"]:checked')?.value || 'self';
@@ -440,14 +440,21 @@ async function fetchAttendance() {
     if (!employeeId) { displayAttendanceError('請輸入員工 ID'); return; }
     if (!startDate)  { const labels={day:'日期',month:'月份',quarter:'季度',year:'年份'}; displayAttendanceError(`請選擇${labels[period]||'日期'}`); return; }
     const isAggregated = (period==='month'||period==='quarter'||period==='year');
+    
     try {
+        // 🔥 取得 JWT Authorization 標頭
+        const authHeaders = await ensureReportAuth(employeeId);
+
         if (mode === 'org') {
             const endpoint = isAggregated ? 'manager-team/aggregated' : 'manager-team';
             let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
-            const headers = await ensureReportAuth(employeeId);
-            const response = await fetch(url, { headers });
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: authHeaders // 注入 Token
+            });
             const data = await response.json();
             if (response.status===403) throw new Error(`${employeeId} 無主管權限`);
             if (!response.ok) throw new Error(data.error||'查詢失敗');
@@ -460,8 +467,11 @@ async function fetchAttendance() {
             let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
-            const headers = await ensureReportAuth(employeeId);
-            const response = await fetch(url, { headers });
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: authHeaders // 注入 Token
+            });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error||'查詢失敗');
             const reports = Array.isArray(data)?data:[];
@@ -592,18 +602,12 @@ function displayAttendanceError(message) {
 }
 
 async function exportAttendanceExcel() {
-    // 假設你的 getPeriodDateRange() 回傳 { startDate, endDate }
     const { startDate, endDate } = getPeriodDateRange();
-    
     try {
-        // 1. 建立安全且符合後端設計的 URL
         const baseUrl = `${getReportUrl()}/v1/reports/attendance/export`;
         const urlObj = new URL(baseUrl);
-        
-        // 後端支援 format=excel，雖然是 default 但帶上更明確
         urlObj.searchParams.append('format', 'excel'); 
         
-        // 根據後端 resolveDateRange 的邏輯帶入參數
         if (startDate && endDate) {
             urlObj.searchParams.append('start_date', startDate);
             urlObj.searchParams.append('end_date', endDate);
@@ -611,46 +615,38 @@ async function exportAttendanceExcel() {
             urlObj.searchParams.append('date', startDate);
         }
 
-        // 2. 發送請求（若有實作 JWT，記得在 headers 補上 Authorization）
+        const employeeId = document.getElementById('attendance-employee-id')?.value?.trim() || state.currentBadge;
+        // 🔥 補上 Excel 匯出的安全憑證 Header
+        const authHeaders = await ensureReportAuth(employeeId);
+
         const response = await fetch(urlObj.toString(), {
             method: 'GET',
-            headers: {
-                // 'Authorization': `Bearer ${localStorage.getItem('token')}` // 依你環境決定是否開啟
-            }
+            headers: authHeaders
         });
         
         if (!response.ok) throw new Error('後端產生報表失敗');
 
-        // 3. 解析後端回傳的標準檔名 (從 Content-Disposition 撈取)
         let filename = `attendance-${startDate || new Date().toISOString().split('T')[0]}.xlsx`;
         const disposition = response.headers.get('Content-Disposition');
         if (disposition && disposition.includes('filename=')) {
             const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
             const matches = filenameRegex.exec(disposition);
             if (matches != null && matches[1]) { 
-                // 去除可能包夾的雙引號
                 filename = matches[1].replace(/['"]/g, '');
             }
         }
 
-        // 4. 轉為 Blob 並觸發瀏覽器下載
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
-        
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = filename; // 使用後端提供的漂亮檔名
+        link.download = filename;
         
-        // 確保跨瀏覽器相容性的 DOM 操作
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         
-        // 延遲釋放記憶體，避免下載被瀏覽器提早中斷
-        setTimeout(() => {
-        URL.revokeObjectURL(downloadUrl);
-        }, 250);
-
+        setTimeout(() => { URL.revokeObjectURL(downloadUrl); }, 250);
     } catch (error) {
         alert('匯出失敗: ' + error.message);
     }
@@ -698,8 +694,11 @@ function buildLineChart(canvasId, labels, datasets) {
 async function showDayAuditModal(employeeId, name, date) {
     openModal(`${name}（${employeeId}）— ${date}`);
     try {
+        // 🔥 補上單日詳細刷卡紀錄 Audit Trail 的授權 Header
+        const authHeaders = await ensureReportAuth(employeeId);
         const url = `${getReportUrl()}/v1/audit?badge_id=${employeeId}&start_date=${date}&end_date=${date}`;
-        const response = await fetch(url);
+        
+        const response = await fetch(url, { headers: authHeaders });
         const events   = await response.json();
         if (!response.ok) throw new Error(events.error||'查詢失敗');
         if (!events||events.length===0) { setModalContent('<p class="modal-loading">當日無刷卡紀錄</p>'); return; }
@@ -732,7 +731,7 @@ async function showDayAuditModal(employeeId, name, date) {
     }
 }
 
-// ── Personal Trend Modal ──────────────────────
+// ── Personal Trend Modal [FIXED] ──────────────
 function showPersonalTrendModal(employeeId, name) {
     openModal(`${name}（${employeeId}）出勤趨勢`);
     const { period, startDate, endDate } = getPeriodDateRange();
@@ -753,12 +752,15 @@ function showPersonalTrendModal(employeeId, name) {
         setModalContent(chartHtml);
         requestAnimationFrame(()=>reRenderPersonalChart());
     } else {
-        const url=`${getReportUrl()}/v1/reports/attendance?as=${employeeId}&start_date=${startDate}&end_date=${endDate}`;
-        fetch(url).then(r=>r.json()).then(data=>{
+        // 🔥 修正：點擊趨勢圖彈出視窗時，同樣需要帶入 Auth Header 請求資料
+        ensureReportAuth(employeeId).then(authHeaders => {
+            const url=`${getReportUrl()}/v1/reports/attendance?as=${employeeId}&start_date=${startDate}&end_date=${endDate}`;
+            return fetch(url, { headers: authHeaders });
+        }).then(r=>r.json()).then(data=>{
             const dailyData=(Array.isArray(data)?data:[]).filter(r=>r.employee_id===employeeId).sort((a,b)=>a.work_date.localeCompare(b.work_date));
             if (!dailyData.length) { setModalContent('<p class="modal-loading">無資料</p>'); return; }
             state.modalPersonalData=dailyData;
-                setModalContent(chartHtml);
+            setModalContent(chartHtml);
             requestAnimationFrame(()=>reRenderPersonalChart());
         }).catch(err=>setModalContent(`<div class="error-inline">錯誤：${err.message}</div>`));
     }
@@ -822,10 +824,13 @@ async function showOrgTrend() {
         const periodLabel = period==='quarter'?'季':period==='year'?'年':'月';
         const trendPeriod = period==='year'?'year':'day';
         try {
+            // 🔥 補上組織趨勢的 Auth Header 驗證機制
+            const authHeaders = await ensureReportAuth(managerId);
             let url=`${getReportUrl()}/v1/reports/trend?period=${trendPeriod}&as=${managerId}`;
             if (startDate) url+=`&start_date=${startDate}`;
             if (endDate)   url+=`&end_date=${endDate}`;
-            const response=await fetch(url, { headers:state.token?{Authorization:`Bearer ${state.token}`}:{} });
+            
+            const response=await fetch(url, { headers: authHeaders });
             const data=await response.json();
             if (!response.ok) throw new Error(data.error||'趨勢查詢失敗');
             const trends=(data.trends||[]).sort((a,b)=>a.bucket.localeCompare(b.bucket));
@@ -882,39 +887,28 @@ function reRenderOrgChart() {
             y: { ...chartDefaults().scales.y, title:{ display:true, text:cfg.yTitle, color:CHART_OPTS.mutedColor, font:{size:11} } }
         }
     };
-        state.modalChart = new Chart(ctx, {
+    state.modalChart = new Chart(ctx, {
         type:'line',
         data:{ labels, datasets:[{ label:cfg.label, data, borderColor:cfg.color, backgroundColor:cfg.color+'18', tension:.4, fill:true, pointRadius:3, borderWidth:1.5 }] },
         options: opts
-        });
+    });
 }
 
-// ── Alerts ────────────────────────────────────
 // ── Alerts ────────────────────────────────────
 async function fetchAlerts() {
     const severity = document.getElementById('alert-severity')?.value;
     try {
-        // 1. 確保有取得有效的 Token 認證
-        const authHeaders = await ensureReportAuth().catch(() => null);
+        const employeeId = document.getElementById('attendance-employee-id')?.value?.trim() || state.currentBadge;
+        // 🔥 補上警報異常系統的 Auth 憑證 Header 注入
+        const authHeaders = await ensureReportAuth(employeeId);
+        let url=`${getReportUrl()}/v1/alerts`;
+        if (severity) url+=`?severity=${severity}`;
         
-        let url = `${getReportUrl()}/v1/alerts`;
-        if (severity) url += `?severity=${severity}`;
-        
-        // 2. 在 fetch 請求中加入 Headers
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(authHeaders || (state.token ? { 'Authorization': `Bearer ${state.token}` } : {}))
-            }
-        });
-        
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || '查詢失敗');
+        const response=await fetch(url, { headers: authHeaders });
+        const data=await response.json();
+        if (!response.ok) throw new Error(data.error||'查詢失敗');
         displayAlerts(data);
-    } catch (error) { 
-        alert('警報查詢失敗: ' + error.message); 
-    }
+    } catch (error) { alert('警報查詢失敗: '+error.message); }
 }
 
 function displayAlerts(alerts) {
