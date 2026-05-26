@@ -60,11 +60,7 @@ spec:
               name: pacs-config
               key: LOG_LEVEL
 
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: pacs-secrets
-              key: JWT_SECRET
+
         resources:
           requests:
             memory: "256Mi"
