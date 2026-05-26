@@ -30,7 +30,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: access-api
-        image: gcr.io/PROJECT_ID/pacs-access-api:latest
+        image: gcr.io/extreme-water-497313-j8/pacs-access-api:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -59,6 +59,12 @@ spec:
             configMapKeyRef:
               name: pacs-config
               key: LOG_LEVEL
+
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pacs-secrets
+              key: JWT_SECRET
         resources:
           requests:
             memory: "256Mi"

@@ -30,7 +30,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: reporting-api
-        image: gcr.io/PROJECT_ID/pacs-reporting-api:latest
+        image: gcr.io/extreme-water-497313-j8/pacs-reporting-api:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8081
