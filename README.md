@@ -21,6 +21,33 @@ sleep 25  # 等待 migrate 與各服務就緒
 - **Access API**: <http://localhost:8080>
 - **Reporting API**: <http://localhost:8081>
 
+## ☁️ GKE HTTPS Demo
+
+Current cloud endpoint:
+
+```text
+https://34-107-166-43.sslip.io
+```
+
+To configure or repair the demo HTTPS endpoint on GKE:
+
+```bash
+make gke-https-demo
+```
+
+This reserves or reuses the global static IP `pacs-ingress-ip`, derives an
+`sslip.io` hostname from that IP, applies the GKE managed certificate and
+Ingress redirect resources, waits for the certificate to become `Active`, and
+runs an HTTPS smoke test.
+
+Useful checks:
+
+```bash
+make gke-https-generate-demo-domain
+make gke-https-status DOMAIN_NAME=34-107-166-43.sslip.io
+make gke-https-smoke DOMAIN_NAME=34-107-166-43.sslip.io
+```
+
 ## 🏗 系統架構簡介
 
 系統為讀寫分離的高效能設計：
@@ -48,4 +75,3 @@ sleep 25  # 等待 migrate 與各服務就緒
 
 本系統提供豐富的單元與端到端 (E2E) 測試機制。
 👉 **[測試詳細](docs/TestingGuide.md)**
-
