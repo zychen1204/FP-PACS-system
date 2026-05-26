@@ -799,10 +799,13 @@ async function showOrgTrend() {
         `);
 
     } else {
-        // month / quarter / year → 呼叫 trend API，x 軸為 daily bucket
+        // month → daily bucket（細粒度）
+        // quarter → daily bucket（可看出週期變化）
+        // year → 傳 year，後端自動轉 month bucket（12 個點位，避免 365 天過密）
         const periodLabel = period === 'quarter' ? '季' : period === 'year' ? '年' : '月';
+        const trendPeriod = period === 'year' ? 'year' : 'day';
         try {
-            let url = `${getReportUrl()}/v1/reports/trend?period=day&as=${managerId}`;
+            let url = `${getReportUrl()}/v1/reports/trend?period=${trendPeriod}&as=${managerId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
 
