@@ -16,7 +16,7 @@
 
 
 
-- [ ] 傳輸安全優化：將 HTTP 變更為 HTTPS：配置網域 TLS/SSL 憑證（例如透過 GKE Ingress ManagedCertificate 或 cert-manager），全面強制安全性加密連線。
+- [x] 傳輸安全優化：已加入 GKE HTTPS 部署模式。設定 `DOMAIN_NAME=pacs.example.com make gke-deploy` 後，部署腳本會建立 global static IP、套用 `ManagedCertificate`、啟用 `FrontendConfig` HTTP-to-HTTPS redirect。仍需在 DNS provider 將網域 A record 指向 static IP，並等待憑證 `CertificateStatus: Active`。
 
 - [x] **內嵌 IP/端點（動態 URL 優化）**：移除程式碼或設定檔中硬編碼的固定 IP，全面改由環境變數（Environment Variables）、K8s ConfigMap 或透過 K8s Service / Ingress 內部域名進行動態解析，確保上雲後部署彈性。
   - 移除 `k8s/08-ingress.yaml` 中的 `static-ip-name` annotation，改由 GKE Load Balancer 自動分配動態 IP

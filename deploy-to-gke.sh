@@ -30,6 +30,16 @@ GKE_DISK_SIZE=${GKE_DISK_SIZE:-30}
 DB_PASSWORD=${DB_PASSWORD:-$(openssl rand -base64 16)}
 JWT_SECRET=${JWT_SECRET:-$(openssl rand -base64 32)}
 BUILD_IMAGES=${BUILD_IMAGES:-1}
+DOMAIN_NAME=${DOMAIN_NAME:-}
+ENABLE_HTTPS=${ENABLE_HTTPS:-}
+STATIC_IP_NAME=${STATIC_IP_NAME:-pacs-ingress-ip}
+WAIT_FOR_CERT=${WAIT_FOR_CERT:-0}
+CERT_WAIT_TIMEOUT=${CERT_WAIT_TIMEOUT:-3600}
+
+if [ -n "$DOMAIN_NAME" ] && [ -z "$ENABLE_HTTPS" ]; then
+    ENABLE_HTTPS=1
+fi
+ENABLE_HTTPS=${ENABLE_HTTPS:-0}
 
 if [ -z "$PROJECT_ID" ]; then
     echo "❌ 用法：$0 <PROJECT_ID> [REGION] [CLUSTER_NAME]"
@@ -43,7 +53,19 @@ echo "║ 專案  : $PROJECT_ID"
 echo "║ 區域  : $REGION"
 echo "║ 叢集  : $CLUSTER_NAME"
 echo "║ 節點  : ${GKE_NUM_NODES}/zone, ${GKE_MACHINE_TYPE}, ${GKE_DISK_SIZE}GB ${GKE_DISK_TYPE}"
+echo "║ HTTPS : ${ENABLE_HTTPS}"
+if [ "$ENABLE_HTTPS" = "1" ]; then
+    echo "║ 網域  : ${DOMAIN_NAME}"
+    echo "║ 靜態IP: ${STATIC_IP_NAME}"
+    echo "║ 等憑證: ${WAIT_FOR_CERT}"
+fi
 echo "╚════════════════════════════════════════════════════════╝"
+
+if [ "$ENABLE_HTTPS" = "1" ] && [ -z "$DOMAIN_NAME" ]; then
+    echo "❌ ENABLE_HTTPS=1 時必須設定 DOMAIN_NAME，例如："
+    echo "   DOMAIN_NAME=pacs.example.com make gke-deploy"
+    exit 1
+fi
 
 gcloud config set project "$PROJECT_ID"
 
@@ -57,9 +79,35 @@ gcloud services enable \
     iam.googleapis.com \
     cloudbuild.googleapis.com \
     containerregistry.googleapis.com \
+    compute.googleapis.com \
     serviceusage.googleapis.com \
     --project="$PROJECT_ID"
 echo "   ✅ APIs 已啟用或原本已啟用"
+
+if [ "$ENABLE_HTTPS" = "1" ]; then
+    echo ""
+    echo "🌐 [0.5/7] 確保 HTTPS Ingress 使用的 global static IP 存在..."
+    if ! gcloud compute addresses describe "$STATIC_IP_NAME" --global &>/dev/null; then
+        gcloud compute addresses create "$STATIC_IP_NAME" --global
+        echo "   ✅ Static IP 建立完成"
+    else
+        echo "   ✅ Static IP 已存在"
+    fi
+    STATIC_IP_ADDRESS=$(gcloud compute addresses describe "$STATIC_IP_NAME" --global --format="value(address)")
+    echo "   Static IP: $STATIC_IP_ADDRESS"
+    echo "   請確認 DNS A record 已指向此 IP：${DOMAIN_NAME} -> ${STATIC_IP_ADDRESS}"
+    if command -v getent >/dev/null 2>&1; then
+        DNS_IPS=$(getent ahostsv4 "$DOMAIN_NAME" | awk '{print $1}' | sort -u | tr '\n' ' ' || true)
+        if [ -z "$DNS_IPS" ]; then
+            echo "   ⚠️  目前查不到 ${DOMAIN_NAME} 的 A record。請先到 DNS provider 新增 A record。"
+        elif [[ " $DNS_IPS " == *" $STATIC_IP_ADDRESS "* ]]; then
+            echo "   ✅ DNS 已指向 static IP：$DNS_IPS"
+        else
+            echo "   ⚠️  DNS 目前是：$DNS_IPS"
+            echo "      需要改成：${DOMAIN_NAME} -> ${STATIC_IP_ADDRESS}"
+        fi
+    fi
+fi
 
 # ── 1. GKE 叢集 ───────────────────────────────────────────────
 echo ""
@@ -151,9 +199,24 @@ kubectl annotate serviceaccount pacs-sa \
 echo ""
 echo "🐳 [5/7] 建立並推送 Docker Images..."
 if [ "$BUILD_IMAGES" = "1" ]; then
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "❌ 找不到 docker。請安裝 Docker Desktop，並開啟 WSL Integration。"
+        echo "   如果 images 已經推送過，可以改用：make gke-deploy-no-build"
+        exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        echo "❌ Docker 在目前 shell 無法使用。"
+        echo "   WSL 解法：啟動 Docker Desktop，並到 Settings > Resources > WSL Integration 啟用此 distro。"
+        echo "   如果 images 已經存在，可以改用：make gke-deploy-no-build"
+        exit 1
+    fi
+
     export DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/pacs-docker-config}
     mkdir -p "$DOCKER_CONFIG"
-    gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io >/dev/null
+    if ! gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io >/dev/null; then
+        echo "❌ Docker 登入 gcr.io 失敗。請確認 gcloud 已登入，且帳號有推送 Container Registry 的權限。"
+        exit 1
+    fi
 
     BACKEND_SERVICES=("access-api" "event-processor" "reporting-api" "anomaly-detector" "mv-refresher" "org-sync")
     for svc in "${BACKEND_SERVICES[@]}"; do
@@ -238,19 +301,53 @@ apply_yaml() {
     sed "s|gcr\.io/PROJECT_ID|gcr.io/$PROJECT_ID|g" "$1" | kubectl apply -f -
 }
 
+apply_https_ingress() {
+    sed \
+        -e "s|DOMAIN_NAME|$DOMAIN_NAME|g" \
+        -e "s|STATIC_IP_NAME|$STATIC_IP_NAME|g" \
+        k8s/08-ingress-https.yaml | kubectl apply -f -
+}
+
 apply_yaml k8s/00-namespace.yaml
 # k8s/01-config.yaml 不在此套用；ConfigMap/Secret 已由上方步驟動態建立
 apply_yaml k8s/03-access-api.yaml
 apply_yaml k8s/04-reporting-api.yaml
 apply_yaml k8s/05-processors.yaml
 apply_yaml k8s/06-migrations.yaml
-apply_yaml k8s/08-ingress.yaml
+if [ "$ENABLE_HTTPS" = "1" ]; then
+    apply_https_ingress
+else
+    apply_yaml k8s/08-ingress.yaml
+fi
+
 apply_yaml k8s/09-network-policy.yaml
 apply_yaml k8s/10-pdb.yaml
 apply_yaml k8s/11-frontend.yaml
 apply_yaml k8s/12-db-tools.yaml
 # k8s/02-redis.yaml 不部署（GKE 使用 Memorystore）
 # k8s/07-k6-load-test.yaml 手動執行
+
+if [ "$ENABLE_HTTPS" = "1" ] && [ "$WAIT_FOR_CERT" = "1" ]; then
+    echo ""
+    echo "⏳ 等待 ManagedCertificate Active（最多 ${CERT_WAIT_TIMEOUT} 秒）..."
+    deadline=$((SECONDS + CERT_WAIT_TIMEOUT))
+    while true; do
+        CERT_STATUS=$(kubectl get managedcertificate pacs-managed-cert \
+            --namespace=pacs \
+            -o jsonpath='{.status.certificateStatus}' 2>/dev/null || true)
+        echo "   CertificateStatus: ${CERT_STATUS:-<not ready>}"
+        if [ "$CERT_STATUS" = "Active" ]; then
+            echo "   ✅ HTTPS 憑證已啟用：https://${DOMAIN_NAME}"
+            break
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "   ⚠️  等待憑證逾時。請確認 DNS A record 指向 ${STATIC_IP_ADDRESS}，再執行："
+            echo "      kubectl describe managedcertificate pacs-managed-cert -n pacs"
+            break
+        fi
+        sleep 30
+    done
+fi
 
 echo ""
 echo "⏳ 等待 Migration Job 完成（最多 3 分鐘）..."
@@ -263,16 +360,31 @@ echo "✅ 部署完成！"
 echo ""
 echo "━━━ 下一步 ━━━"
 echo "1. 查看 Pod 狀態："
+echo "   make k8s-pods"
+echo "   # 或："
 echo "   kubectl get pods -n pacs"
 echo ""
 echo "2. 取得 Ingress IP（可能需 2-3 分鐘才分配）："
+echo "   make gke-ingress"
+echo "   # 或："
 echo "   kubectl get ingress pacs-ingress -n pacs"
+if [ "$ENABLE_HTTPS" = "1" ]; then
+    echo "   HTTPS 憑證狀態："
+    echo "   kubectl describe managedcertificate pacs-managed-cert -n pacs"
+    echo "   或：make gke-https-status DOMAIN_NAME=${DOMAIN_NAME}"
+    echo "   等待：make gke-https-wait DOMAIN_NAME=${DOMAIN_NAME}"
+    echo "   等狀態變成 Active 後使用：https://${DOMAIN_NAME}"
+fi
 echo ""
 echo "3. 雲端大規模播種（90,000 人，手動執行）："
+echo "   make gke-seed-cloud"
+echo "   # 或進入 db-tools Pod 手動執行："
 echo "   kubectl exec -it -n pacs pod/db-tools -c psql -- sh"
 echo "   psql -v ON_ERROR_STOP=1 -f /cloud-seed/0104_cloud_seed.up.sql"
 echo ""
 echo "4. 壓力測試："
+echo "   make k6-gke"
+echo "   # 或："
 echo "   kubectl delete job -n pacs k6-shift-burst --ignore-not-found"
 echo "   kubectl apply -f k8s/07-k6-load-test.yaml"
 echo "   kubectl logs -f -n pacs job/k6-shift-burst"

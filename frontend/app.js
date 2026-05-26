@@ -5,12 +5,12 @@
 // State Management
 const state = {
     // API URLs
-    apiUrl: localStorage.getItem('apiUrl') || 'http://localhost:8080',
-    reportUrl: localStorage.getItem('reportUrl') || 'http://localhost:8081',
+    apiUrl: localStorage.getItem('apiUrl') || '',
+    reportUrl: localStorage.getItem('reportUrl') || '',
     
     // Auth
     token: localStorage.getItem('pacs_token') || null,
-    currentBadge: localStorage.getItem('current_badge') || 'B001',
+    currentBadge: localStorage.getItem('current_badge') || 'B-000001',
     
     // Data
     swipeHistory: JSON.parse(localStorage.getItem('swipeHistory')) || [],
@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeApp() {
+    sanitizeApiSettings();
     setupEventListeners();
     restoreSettings();
     testServerConnection();
@@ -178,11 +179,109 @@ function selectDirection(e) {
 }
 
 // ============ API URL HELPERS ============
+function isLocalHostname(hostname) {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function normalizeApiUrl(url) {
+    if (!url) return window.location.origin;
+
+    try {
+        const parsed = new URL(url, window.location.origin);
+        const localApiHost = isLocalHostname(parsed.hostname);
+        const localPageHost = isLocalHostname(window.location.hostname);
+        const cloudPageHost = window.location.protocol.startsWith('http') && !localPageHost;
+
+        if (cloudPageHost && (localApiHost || parsed.hostname === window.location.hostname)) {
+            return window.location.origin;
+        }
+
+        if (window.location.protocol === 'https:' && parsed.protocol === 'http:') {
+            return window.location.origin;
+        }
+
+        return parsed.toString().replace(/\/$/, '');
+    } catch (_) {
+        return window.location.origin;
+    }
+}
+
 function getApiUrl() {
-    return state.apiUrl || window.location.origin;
+    return normalizeApiUrl(state.apiUrl);
 }
 function getReportUrl() {
-    return state.reportUrl || window.location.origin;
+    return normalizeApiUrl(state.reportUrl);
+}
+
+function getAccessHealthUrl() {
+    return `${window.location.origin}/api/healthz`;
+}
+
+function getReportHealthUrl() {
+    return `${window.location.origin}/api/report-healthz`;
+}
+
+function sanitizeApiUrlForStorage(url) {
+    if (!url) return '';
+    const normalized = normalizeApiUrl(url);
+    return normalized === window.location.origin ? '' : normalized;
+}
+
+function sanitizeApiSettings() {
+    const sanitizedApiUrl = sanitizeApiUrlForStorage(state.apiUrl);
+    const sanitizedReportUrl = sanitizeApiUrlForStorage(state.reportUrl);
+
+    state.apiUrl = sanitizedApiUrl;
+    state.reportUrl = sanitizedReportUrl;
+
+    if (sanitizedApiUrl) {
+        localStorage.setItem('apiUrl', sanitizedApiUrl);
+    } else {
+        localStorage.removeItem('apiUrl');
+    }
+
+    if (sanitizedReportUrl) {
+        localStorage.setItem('reportUrl', sanitizedReportUrl);
+    } else {
+        localStorage.removeItem('reportUrl');
+    }
+}
+
+async function ensureReportAuth(badgeId = state.currentBadge) {
+    const badge = badgeId || state.currentBadge || 'B-000001';
+
+    if (state.token && state.currentBadge === badge && isJwtUsable(state.token)) {
+        return { Authorization: `Bearer ${state.token}` };
+    }
+
+    const response = await fetch(`${getReportUrl()}/v1/dev/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ badge_id: badge })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '登入失敗，無法查詢報表');
+
+    state.token = data.access_token;
+    state.currentBadge = badge;
+    localStorage.setItem('pacs_token', data.access_token);
+    localStorage.setItem('current_badge', badge);
+
+    return { Authorization: `Bearer ${state.token}` };
+}
+
+function isJwtUsable(token) {
+    try {
+        const encodedPayload = token.split('.')[1]
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+        const paddedPayload = encodedPayload.padEnd(encodedPayload.length + (4 - encodedPayload.length % 4) % 4, '=');
+        const payload = JSON.parse(atob(paddedPayload));
+        if (!payload.exp) return true;
+        return payload.exp > Math.floor(Date.now() / 1000) + 60;
+    } catch (_) {
+        return false;
+    }
 }
 
 // ============ SWIPE REQUEST ============
@@ -212,9 +311,11 @@ async function sendSwipe() {
         
         const data = await response.json();
         displaySwipeResponse(response.status, data, payload);
+        recordSwipeHistory(response.status, data, payload);
         
     } catch (error) {
         displaySwipeResponse(0, { error: error.message }, payload);
+        recordSwipeHistory(0, { error: error.message }, payload);
     }
 }
 
@@ -232,7 +333,6 @@ function displaySwipeResponse(status, data, payload) {
     
     const isSuccess = status === 200 && data.status === 'SUCCESS';
     const directionText = payload?.direction === 'IN' ? '進入' : '離開';
-    const gateText = payload?.gate_id ? ` (${payload.gate_id})` : '';
     
     if (isSuccess) {
         successDiv.classList.remove('hidden');
@@ -246,8 +346,7 @@ function displaySwipeResponse(status, data, payload) {
     } else {
         failDiv.classList.remove('hidden');
         const siteText = payload?.site_id ? `${payload.site_id} ` : '';
-        const reason = data.reason ? `${data.reason} - ` : '';
-        document.getElementById('swipe-fail-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡失敗 (${data.reason || '拒絕通行'})`;
+        document.getElementById('swipe-fail-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡失敗 (${data.reason || data.error || '拒絕通行'})`;
         
         // Reset animation by removing and re-adding elements
         const oldCircle = failDiv.querySelector('.cross-circle');
@@ -258,23 +357,60 @@ function displaySwipeResponse(status, data, payload) {
 
 
 
+function recordSwipeHistory(status, data, payload) {
+    state.swipeHistory.unshift({
+        time: new Date().toISOString(),
+        http_status: status,
+        request: payload,
+        response: data
+    });
+    state.swipeHistory = state.swipeHistory.slice(0, 20);
+    localStorage.setItem('swipeHistory', JSON.stringify(state.swipeHistory));
+}
+
+function loadSwipeHistory() {
+    try {
+        state.swipeHistory = JSON.parse(localStorage.getItem('swipeHistory') || '[]');
+    } catch (_) {
+        state.swipeHistory = [];
+    }
+}
+
+function clearHistory() {
+    state.swipeHistory = [];
+    localStorage.removeItem('swipeHistory');
+}
+
 // ============ SETTINGS ============
 function saveSettings() {
-    const apiUrl = document.getElementById('api-url').value.trim();
-    const reportUrl = document.getElementById('report-url').value.trim();
+    const apiUrl = sanitizeApiUrlForStorage(document.getElementById('api-url')?.value?.trim() || '');
+    const reportUrl = sanitizeApiUrlForStorage(document.getElementById('report-url')?.value?.trim() || '');
 
     state.apiUrl = apiUrl;
     state.reportUrl = reportUrl;
 
-    localStorage.setItem('apiUrl', apiUrl);
-    localStorage.setItem('reportUrl', reportUrl);
+    if (apiUrl) {
+        localStorage.setItem('apiUrl', apiUrl);
+    } else {
+        localStorage.removeItem('apiUrl');
+    }
+
+    if (reportUrl) {
+        localStorage.setItem('reportUrl', reportUrl);
+    } else {
+        localStorage.removeItem('reportUrl');
+    }
 
     alert('設定已儲存');
+    restoreSettings();
 }
 
 function restoreSettings() {
-    document.getElementById('api-url').value = state.apiUrl;
-    document.getElementById('report-url').value = state.reportUrl;
+    const apiUrlInput = document.getElementById('api-url');
+    const reportUrlInput = document.getElementById('report-url');
+
+    if (apiUrlInput) apiUrlInput.value = state.apiUrl;
+    if (reportUrlInput) reportUrlInput.value = state.reportUrl;
 }
 
 // ============ CONNECTION TEST ============
@@ -282,20 +418,20 @@ async function testServerConnection() {
     const connectionResult = document.getElementById('connection-result');
     const connectionContent = document.getElementById('connection-content');
 
-    connectionResult.classList.remove('hidden', 'success', 'error');
+    connectionResult?.classList.remove('hidden', 'success', 'error');
 
     try {
-        const accessTest = await fetch(`${getApiUrl()}/healthz`, { method: 'GET' })
+        const accessTest = await fetch(getAccessHealthUrl(), { method: 'GET' })
             .then(r => r.ok).catch(() => false);
-        const reportTest = await fetch(`${getReportUrl()}/healthz`, { method: 'GET' })
+        const reportTest = await fetch(getReportHealthUrl(), { method: 'GET' })
             .then(r => r.ok).catch(() => false);
 
         const accessStatus = accessTest ? '✓ 連線成功' : '✗ 無法連接';
         const reportStatus = reportTest ? '✓ 連線成功' : '✗ 無法連接';
 
-        connectionResult.classList.add(accessTest && reportTest ? 'success' : 'error');
+        connectionResult?.classList.add(accessTest && reportTest ? 'success' : 'error');
 
-        connectionContent.innerHTML = `
+        if (connectionContent) connectionContent.innerHTML = `
             <strong>Access API (Port 8080):</strong> ${accessStatus}<br>
             <strong>Reporting API (Port 8081):</strong> ${reportStatus}<br><br>
             <small>透過 Nginx 反向代理連接後端微服務</small>
@@ -304,8 +440,8 @@ async function testServerConnection() {
         updateServerStatus(accessTest && reportTest);
 
     } catch (error) {
-        connectionResult.classList.add('error');
-        connectionContent.innerHTML = `<strong>❌ 連線測試失敗:</strong> ${error.message}`;
+        connectionResult?.classList.add('error');
+        if (connectionContent) connectionContent.innerHTML = `<strong>❌ 連線測試失敗:</strong> ${error.message}`;
         updateServerStatus(false);
     }
 }
@@ -314,6 +450,7 @@ function updateServerStatus(online) {
     const indicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
 
+    if (!indicator || !statusText) return;
     indicator.classList.remove('online', 'offline');
     indicator.classList.add(online ? 'online' : 'offline');
     statusText.textContent = online ? '線上' : '離線';
@@ -396,13 +533,15 @@ async function fetchAttendance() {
     const isAggregated = (period === 'month' || period === 'quarter');
 
     try {
+        const headers = await ensureReportAuth(employeeId);
+
         if (mode === 'org') {
             const endpoint = isAggregated ? 'manager-team/aggregated' : 'manager-team';
             let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
 
-            const response = await fetch(url);
+            const response = await fetch(url, { headers });
             const data = await response.json();
 
             if (response.status === 403) throw new Error(`${employeeId} 無主管權限，無法查詢底下組織`);
@@ -418,7 +557,7 @@ async function fetchAttendance() {
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
 
-            const response = await fetch(url);
+            const response = await fetch(url, { headers });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || '查詢失敗');
 
@@ -471,8 +610,8 @@ function displayAttendanceReport(reports, scope, mode, period) {
     const scopeEl = document.getElementById('attendance-scope');
     const orgTrendBtn = document.getElementById('btn-org-trend');
 
-    scopeBar.style.display = scope ? '' : 'none';
-    if (scope) scopeEl.textContent = scope;
+    if (scopeBar) scopeBar.style.display = scope ? '' : 'none';
+    if (scope && scopeEl) scopeEl.textContent = scope;
     if (orgTrendBtn) orgTrendBtn.style.display = (mode === 'org' && scope) ? '' : 'none';
 
     buildAttendanceHeader(period, mode);
@@ -563,16 +702,21 @@ function displayAttendanceError(message) {
     const orgTrendBtn = document.getElementById('btn-org-trend');
     if (scopeBar) scopeBar.style.display = 'none';
     if (orgTrendBtn) orgTrendBtn.style.display = 'none';
-    statsContainer.innerHTML = `<div class="error-inline">❌ ${message}</div>`;
-    tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
+    if (statsContainer) statsContainer.innerHTML = `<div class="error-inline">❌ ${message}</div>`;
+    if (tbody) tbody.innerHTML = '<tr class="empty"><td colspan="9">查詢失敗</td></tr>';
 }
 
 async function exportAttendanceExcel() {
     const { startDate } = getPeriodDateRange();
+    const employeeId = document.getElementById('attendance-employee-id')?.value?.trim() || state.currentBadge;
     try {
+        const headers = await ensureReportAuth(employeeId);
         let url = `${getReportUrl()}/v1/reports/attendance/export`;
-        if (startDate) url += `?date=${startDate}`;
-        const response = await fetch(url);
+        const params = new URLSearchParams();
+        if (employeeId) params.set('as', employeeId);
+        if (startDate) params.set('date', startDate);
+        if ([...params].length) url += `?${params.toString()}`;
+        const response = await fetch(url, { headers });
         if (!response.ok) throw new Error('匯出失敗');
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
@@ -650,8 +794,9 @@ function buildBarChart(canvasId, labels, datasets) {
 async function showDayAuditModal(employeeId, name, date) {
     openModal(`🗂️ ${name}（${employeeId}）— ${date} 刷卡紀錄`);
     try {
+        const headers = await ensureReportAuth(employeeId);
         const url = `${getReportUrl()}/v1/audit?badge_id=${employeeId}&start_date=${date}&end_date=${date}`;
-        const response = await fetch(url);
+        const response = await fetch(url, { headers });
         const events = await response.json();
         if (!response.ok) throw new Error(events.error || '查詢失敗');
 
@@ -731,8 +876,13 @@ function showPersonalTrendModal(employeeId, name) {
     } else {
         // Month/quarter mode: fetch fresh per-day data from attendance endpoint
         const url = `${getReportUrl()}/v1/reports/attendance?as=${employeeId}&start_date=${startDate}&end_date=${endDate}`;
-        fetch(url)
-            .then(r => r.json())
+        ensureReportAuth(employeeId)
+            .then(headers => fetch(url, { headers }))
+            .then(async r => {
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || '查詢失敗');
+                return data;
+            })
             .then(data => {
                 const dailyData = (Array.isArray(data) ? data : [])
                     .filter(r => r.employee_id === employeeId)
@@ -827,7 +977,8 @@ async function showOrgTrend() {
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
 
-            const response = await fetch(url, { headers: state.token ? { Authorization: `Bearer ${state.token}` } : {} });
+            const headers = await ensureReportAuth(managerId);
+            const response = await fetch(url, { headers });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || '趨勢查詢失敗');
 
@@ -914,12 +1065,13 @@ async function fetchAlerts() {
     const severity = document.getElementById('alert-severity')?.value;
     
     try {
+        const headers = await ensureReportAuth();
         let url = `${getReportUrl()}/v1/alerts`;
         if (severity) {
             url += `?severity=${severity}`;
         }
         
-        const response = await fetch(url);
+        const response = await fetch(url, { headers });
         const data = await response.json();
         
         if (!response.ok) {
@@ -1047,12 +1199,14 @@ function getDateDaysAgo(days) {
 // Set default dates on load
 window.addEventListener('load', () => {
     const today = new Date().toISOString().split('T')[0];
-    const attendanceDateInput = document.getElementById('attendance-date');
+    const attendanceDateInput = document.getElementById('attendance-date-day');
+    const attendanceMonthInput = document.getElementById('attendance-date-month');
     const managerDateInput = document.getElementById('manager-date');
     const trendStartInput = document.getElementById('trend-start');
     const trendEndInput = document.getElementById('trend-end');
     
     if (attendanceDateInput) attendanceDateInput.value = today;
+    if (attendanceMonthInput) attendanceMonthInput.value = today.slice(0, 7);
     if (managerDateInput) managerDateInput.value = today;
     if (trendStartInput) trendStartInput.value = getDateDaysAgo(7);
     if (trendEndInput) trendEndInput.value = today;
@@ -1060,7 +1214,7 @@ window.addEventListener('load', () => {
 
 // Periodically test connection every 30 seconds
 setInterval(() => {
-    fetch(`${getApiUrl()}/healthz`, { method: 'GET' })
+    fetch(getAccessHealthUrl(), { method: 'GET' })
         .then(r => updateServerStatus(r.ok))
         .catch(() => updateServerStatus(false));
 }, 30000);

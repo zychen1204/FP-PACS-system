@@ -114,7 +114,53 @@ Kubernetes resources:
 Current external endpoint:
 
 ```text
-http://34.107.166.43
+https://34-107-166-43.sslip.io
+```
+
+HTTPS endpoint mode is enabled through a GKE managed certificate, global static
+IP, and HTTP-to-HTTPS redirect. For this demo deployment, `sslip.io` provides a
+public DNS name that resolves to the reserved static IP without a separate
+registrar-managed DNS zone.
+
+```bash
+make gke-https-generate-demo-domain
+make gke-https-demo
+make gke-https-smoke DOMAIN_NAME=34-107-166-43.sslip.io
+DOMAIN_NAME=34-107-166-43.sslip.io make gke-https-status
+```
+
+The reserved global static IP is named `pacs-ingress-ip`:
+
+```bash
+gcloud compute addresses describe pacs-ingress-ip --global \
+  --format='value(address)'
+kubectl describe managedcertificate pacs-managed-cert -n pacs
+```
+
+Expected:
+
+```text
+address = 34.107.166.43
+CertificateStatus = Active
+```
+
+Validated command:
+
+```bash
+make gke-https-demo PROJECT_ID=extreme-water-497313-j8 CERT_WAIT_TIMEOUT=300
+```
+
+Observed result:
+
+```text
+Demo HTTPS domain: 34-107-166-43.sslip.io
+managedcertificate.networking.gke.io/pacs-managed-cert unchanged
+frontendconfig.networking.gke.io/pacs-frontend-config unchanged
+ingress.networking.k8s.io/pacs-ingress unchanged
+ManagedCertificate status: Active
+HTTP redirect: 308 https://34-107-166-43.sslip.io:443/
+Smoke testing https://34-107-166-43.sslip.io
+Smoke test OK
 ```
 
 ## 4. What Was Changed
@@ -135,6 +181,11 @@ The deployment script was made repeatable and cloud-friendly:
   - `DB_TIER=db-custom-2-7680`
 - Uses token-based Docker login for GCR.
 - Adds `BUILD_IMAGES=0` so repeated deploys can skip image rebuilds.
+- Adds optional HTTPS mode through GKE `ManagedCertificate`, `FrontendConfig`,
+  global static IP, and HTTP-to-HTTPS redirect.
+- Adds `make gke-https-demo`, which reserves/reuses `pacs-ingress-ip`, derives
+  an `sslip.io` hostname, applies HTTPS resources, waits for the certificate,
+  and runs an HTTPS smoke test.
 - Avoids putting large generated seed SQL into ConfigMaps.
 - Includes `scripts/k6-load-test/lib/` in the k6 ConfigMap.
 
@@ -423,4 +474,3 @@ Load test:
 k6-shift-burst = Complete
 p99 swipe latency = 4.25ms
 ```
-
