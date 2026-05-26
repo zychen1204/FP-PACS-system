@@ -32,24 +32,46 @@
 
 ## 快速開始（本地）
 
+**推薦方式：一鍵 reset 腳本**
+
 ```bash
-# 1. 啟服務（自動跑 migrations 0001~0103 + 0105 stay_hours fix）
+# 預設 7 天 / local 規模（1,000 人）
+./scripts/demo-reset.sh
+
+# 30 天 + Phase 2 規模（30,000 人）
+./scripts/demo-reset.sh 30 fab
+```
+
+`scripts/demo-reset.sh` 會 down -v → 起服務 → 跑 migration（0001~0106）→ 跑 seed-generator → 灌 SQL → REFRESH MV → 驗證沒有未來時間事件。
+
+**手動步驟（debug 用）**
+
+```bash
+# 1. 啟服務（自動跑 migrations 0001~0103 + 0105 stay_hours + 0106 MV future guard）
 docker compose down -v && docker compose up -d
 
-# 2. 產 30 天 SQL 種子（1,000 人 = Phase 1）
+# 2. 產過去 30 天 SQL 種子（不含今天，1,000 人 = Phase 1）
 cd scripts/seed-generator
 go run . --mode local --days 30
 
 # 3. 灌進 DB
 docker compose exec -T postgres psql -U pacs_user -d pacs_db < seed_history_events.sql
 
-# 4. 確認 MV 有資料
+# 4. REFRESH MV（必要：seed 灌完後 MV 還是空）
 docker compose exec postgres psql -U pacs_user -d pacs_db -c \
-  "SELECT count(*) FROM mv_daily_attendance;"
+  "REFRESH MATERIALIZED VIEW mv_daily_attendance;"
 
-# 5. 開前端看報表（員工 ID 範圍 B-000001 ~ B-001000）
+# 5. 確認沒有未來時間事件
+docker compose exec postgres psql -U pacs_user -d pacs_db -c \
+  "SELECT COUNT(*) AS future_events FROM access_events WHERE event_time > NOW();"
+
+# 6. 開前端看報表（員工 ID 範圍 B-000001 ~ B-001000）
 open http://localhost/
 ```
+
+> **時間軸契約（重要）**：seed-generator 產出的事件**只涵蓋 [today - N, yesterday]**，今天完全不種——今天的資料留給 access-api 即時 swipe 產生（demo 場上點點看就能展示 CQRS write path）。
+> 0099 dev_seed 同理：5 個 demo 主管的 ~45 筆事件全部落在過去 3 天。
+> 任何時候 `SELECT COUNT(*) FROM access_events WHERE event_time > NOW()` 都應該回傳 0。
 
 > **Phase 2 規模（30k）**：`go run . --mode fab --days 30` — 約 1–3 分鐘產 SQL；匯入需 5–10 分鐘。
 > **Phase 3 規模（90k）**：建議跑雲端 `0104_cloud_seed`，seed-generator 在 90k 規模 SQL 檔超過 1GB。

@@ -14,15 +14,10 @@
 ## 快速開始（本地 docker compose）
 
 ```bash
-# 1. 啟服務
-docker compose up -d --build
+# 1. 一鍵重置 + 灌過去 7 天歷史（不含今天，避免未來時間汙染報表）
+./scripts/demo-reset.sh 7
 
-# 2. 灌一點員工資料（給 badge pool 用）
-cd scripts/seed-generator && go run . --mode local --days 7
-docker compose exec -T postgres psql -U pacs_user -d pacs_db < seed_history_events.sql
-cd -
-
-# 3. 跑 k6
+# 2. 跑 k6
 cd scripts/k6-load-test
 BADGE_COUNT=1000 ACCESS_API=http://localhost:8080 \
   docker run --rm --network=host -v "$PWD":/scripts -w /scripts \

@@ -131,11 +131,14 @@ func (p *PostgresDB) QueryAttendance(ctx context.Context, badgeID, startDate, en
 
 // QueryAuditTrail returns the full audit trail for a badge within a date range (FR13)
 // 改 event_time::date → event_date 後可命中 idx_events_badge_eventdate。
+// `event_time <= NOW()` 是 defense-in-depth：即使有未來時間誤入庫（timezone bug、
+// 測試誤插入），audit 仍只回傳「已發生」的事件。
 func (p *PostgresDB) QueryAuditTrail(ctx context.Context, badgeID, startDate, endDate string) ([]models.AccessEvent, error) {
 	rows, err := p.db.QueryContext(ctx,
 		`SELECT id, badge_id, site_id, gate_id, direction, status, reason, event_time
 		 FROM access_events
 		 WHERE badge_id = $1 AND event_date BETWEEN $2 AND $3
+		   AND event_time <= NOW()
 		 ORDER BY event_time DESC`,
 		badgeID, startDate, endDate,
 	)

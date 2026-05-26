@@ -5,7 +5,7 @@ Database build artefacts for PACS. PostgreSQL 16 schema is managed via
 are manual-load helpers for performance testing. Seed + load-test
 工具拆分為兩個獨立目錄。
 
-> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0099 + 0100~0103 + 0105）。
+> **狀態**：Phase 1 + Phase 2 migrations 已落地（0001~0006 + 0099 + 0100~0103 + 0105~0106）。
 > 設計脈絡見 [`../docs/history/PHASE2_CHANGES.md`](../docs/history/PHASE2_CHANGES.md)。
 
 ```
@@ -17,19 +17,21 @@ scripts/
 │   ├── 0004_alerts_table.{up,down}.sql                         Phase 2: FR-11 alerts table (CHECK 列舉 + 索引)
 │   ├── 0005_partition_access_events.{up,down}.sql              Phase 2: access_events RANGE-partition by month (36 個月)
 │   ├── 0006_mv_daily_attendance.{up,down}.sql                  Phase 2: materialized view + UNIQUE + GiST 索引
-│   ├── 0099_dev_seed.{up,down}.sql                             ~45 demo rows tagged reason='[DEV_SEED]' + REFRESH MV
+│   ├── 0099_dev_seed.{up,down}.sql                             ~45 demo rows in [today-3, today-1]（FAB12A/FAB15/FAB18A）+ REFRESH MV
 │   ├── 0100_protect_access_event_partitions.{up,down}.sql      Phase 2 hardening: FR-12 trigger 擴到每個子 partition
 │   ├── 0101_access_event_partition_safety.{up,down}.sql        Phase 2 hardening: default partition + ensure_access_event_partition()
 │   ├── 0102_replace_is_manager_with_job_level.{up,down}.sql    schema evolution: is_manager BOOLEAN → job_level VARCHAR + CHECK
 │   ├── 0103_seed_local.{up,down}.sql                           Phase 1 baseline seed: 1k employees (auto-run via docker compose)
-│   └── 0105_fix_stay_hours_calc.{up,down}.sql                  FR-5 fix: stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片
+│   ├── 0105_fix_stay_hours_calc.{up,down}.sql                  FR-5 fix: stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片
+│   └── 0106_mv_exclude_future.{up,down}.sql                    defense-in-depth: mv_daily_attendance 加 event_time <= NOW() guard
 ├── cloud_migrations/
 │   └── 0104_cloud_seed.{up,down}.sql                           Phase 3 seed: 90k employees (手動執行；非 auto-migrate)
 ├── fixtures/
 │   └── load_test.sql                                           10k events fixture for NFR-2 EXPLAIN ANALYZE
+├── demo-reset.sh                                               一鍵：down -v → up → migrate → seed-generator → REFRESH MV → 驗證
 ├── seed-generator/                                             歷史資料 SQL 種子產生器（demo 用，不做即時壓測）
 │   ├── main.go                                                 CLI：--mode local|fab|cloud / --employees N / --days N
-│   └── realistic-simulator.go                                  含週末/假日/午休/出缺席邏輯，產 seed_history_events.sql
+│   └── realistic-simulator.go                                  產 seed_history_events.sql；時間軸 [today-N, yesterday]，今天不種
 └── k6-load-test/                                               即時 HTTP 壓測（grafana/k6 image）
     ├── shift_burst.js                                          HW2 §4.2 換班尖峰；NFR-1 P99<50ms threshold
     ├── steady_baseline.js                                      常態 QPS 基準對照
@@ -38,8 +40,8 @@ scripts/
 ```
 
 > 註：golang-migrate 依整數版本號排序，實際執行順序為
-> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101 → 0102 → 0103 → 0105`。
-> `0099_dev_seed` 不再是最後一支（被 0100~0105 接在後面）。
+> `0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0099 → 0100 → 0101 → 0102 → 0103 → 0105 → 0106`。
+> `0099_dev_seed` 不再是最後一支（被 0100~0106 接在後面）。
 > 後續 hardening migration 都是 schema-only / additive seed，跑在 dev_seed 之後完全安全。
 > 日後若想保留「dev_seed 永遠最後」的慣例，可把它改成 `9999_dev_seed.sql`。
 
@@ -130,7 +132,8 @@ docker run --rm -v "$(pwd)/scripts/migrations:/migrations" \
 | `0103` | Phase 1 baseline seed：1k 員工 + 部門結構（自動執行）|
 | `0104` | **cloud_migrations/** 的 Phase 3 90k 員工 seed（手動執行，不在 auto-migrate 路徑）|
 | `0105` | FR-5 fix：stay_hours 改 IN/OUT counter pairing + Asia/Taipei midnight 切片 |
-| `0106+` | future hardening / Phase 3 schema 改動 |
+| `0106` | defense-in-depth：mv_daily_attendance 加 `event_time <= NOW()` guard（搭配 0099 + seed-generator 時間軸契約）|
+| `0107+` | future hardening / Phase 3 schema 改動 |
 
 ## 壓測規模 vs Phase 對照
 
