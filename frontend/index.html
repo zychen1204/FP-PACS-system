@@ -34,10 +34,6 @@
                 <span class="nav-icon">⚠️</span>
                 <span class="nav-label">警報異常</span>
             </a>
-            <a href="#" class="nav-item" data-tab="settings-tab">
-                <span class="nav-icon">⚙️</span>
-                <span class="nav-label">系統設定</span>
-            </a>
         </nav>
 
         <div class="sidebar-footer">
@@ -284,78 +280,6 @@
                 </div>
             </section>
 
-            <!-- 6. Settings Tab -->
-            <section id="settings-tab" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>⚙️ 系統設定</h3>
-                    </div>
-
-                    <div class="settings-section">
-                        <h4>連線設定</h4>
-                        <div class="form-group">
-                            <label for="api-url">Access API 網址</label>
-                            <input type="url" id="api-url" placeholder="http://localhost:8080">
-                        </div>
-                        <div class="form-group">
-                            <label for="report-url">Reporting API 網址</label>
-                            <input type="url" id="report-url" placeholder="http://localhost:8081">
-                        </div>
-                        <button id="btn-save-settings" class="btn btn-primary">💾 保存設定</button>
-                        <button id="btn-test-connection" class="btn btn-secondary">🔗 測試連線</button>
-
-                        <div id="connection-result" class="response-box response-box-mt">
-                            <div id="connection-content"></div>
-                        </div>
-                    </div>
-
-                    <hr>
-
-                    <div class="settings-section">
-                        <h4>認證設定（開發模式）</h4>
-                        <div class="form-group">
-                            <label for="dev-login-badge">模擬登入</label>
-                            <input type="text" id="dev-login-badge" placeholder="例: B100">
-                        </div>
-                        <button id="btn-dev-login" class="btn btn-info">🔐 模擬登入</button>
-                        <div id="token-display" class="response-box response-box-mt">
-                            <p id="token-info">未登入</p>
-                        </div>
-                    </div>
-
-                    <hr>
-
-                    <div class="settings-section">
-                        <h4>系統資訊</h4>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="info-label">系統版本</span>
-                                <span class="info-value">2.0.0</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">前端框架</span>
-                                <span class="info-value">Vanilla JS</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">後端架構</span>
-                                <span class="info-value">Go Microservices</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">資料庫</span>
-                                <span class="info-value">PostgreSQL 16</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <hr>
-
-                    <div class="settings-section">
-                        <h4>快速操作</h4>
-                        <button class="btn btn-warning">🗑️ 清除本地紀錄</button>
-                        <button class="btn btn-danger">🔄 重置所有設定</button>
-                    </div>
-                </div>
-            </section>
         </div>
     </main>
 
