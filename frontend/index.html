@@ -182,6 +182,7 @@
                                 <button class="period-btn active" data-period="day">日</button>
                                 <button class="period-btn" data-period="month">月</button>
                                 <button class="period-btn" data-period="quarter">季</button>
+                                <button class="period-btn" data-period="year">年</button>
                             </div>
                         </div>
                         <div class="form-group" id="picker-day">
@@ -203,6 +204,10 @@
                                     <option value="4">Q4（10-12月）</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="form-group" id="picker-year" style="display:none;">
+                            <label>選擇年份</label>
+                            <select id="attendance-year"></select>
                         </div>
                         <button id="btn-fetch-attendance" class="btn btn-primary">
                             📥 查詢

@@ -92,7 +92,7 @@ function setupEventListeners() {
         if (state.modalTrendData) renderModalChart(state.modalTrendData);
     });
 
-    initQuarterYearSelect();
+    initYearSelects();
 
     // Alerts Tab
     document.getElementById('btn-fetch-alerts')?.addEventListener('click', fetchAlerts);
@@ -109,19 +109,12 @@ function switchTab(e) {
     const tabId = e.target.closest('.nav-item')?.getAttribute('data-tab');
     if (!tabId) return;
     
-    // Update active nav
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
+    document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     e.target.closest('.nav-item').classList.add('active');
     
-    // Update active tab content
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
+    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
     document.getElementById(tabId)?.classList.add('active');
     
-    // Update page title
     const titles = {
         'swipe-tab': '刷卡模擬器',
         'attendance-tab': '出席報表',
@@ -139,13 +132,10 @@ function selectTier(e) {
     const tier = e.target.closest('.tier-btn')?.getAttribute('data-tier');
     if (!tier) return;
     
-    document.querySelectorAll('.tier-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.tier-btn').forEach(btn => btn.classList.remove('active'));
     e.target.closest('.tier-btn').classList.add('active');
     state.selectedTier = tier;
     
-    // Update gate options
     const gateSelect = document.getElementById('gate-id');
     if (gateSelect) {
         if (tier === 'outer') {
@@ -170,9 +160,7 @@ function selectDirection(e) {
     const direction = e.target.closest('.direction-btn')?.getAttribute('data-direction');
     if (!direction) return;
     
-    document.querySelectorAll('.direction-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.direction-btn').forEach(btn => btn.classList.remove('active'));
     e.target.closest('.direction-btn').classList.add('active');
     state.selectedDirection = direction;
 }
@@ -232,43 +220,32 @@ function displaySwipeResponse(status, data, payload) {
     
     const isSuccess = status === 200 && data.status === 'SUCCESS';
     const directionText = payload?.direction === 'IN' ? '進入' : '離開';
-    const gateText = payload?.gate_id ? ` (${payload.gate_id})` : '';
     
     if (isSuccess) {
         successDiv.classList.remove('hidden');
         const siteText = payload?.site_id ? `${payload.site_id} ` : '';
         document.getElementById('swipe-success-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡成功`;
-        
-        // Reset animation by removing and re-adding elements
         const oldCircle = successDiv.querySelector('.checkmark-circle');
         const newCircle = oldCircle.cloneNode(true);
         oldCircle.parentNode.replaceChild(newCircle, oldCircle);
     } else {
         failDiv.classList.remove('hidden');
         const siteText = payload?.site_id ? `${payload.site_id} ` : '';
-        const reason = data.reason ? `${data.reason} - ` : '';
         document.getElementById('swipe-fail-msg').textContent = `${directionText} ${siteText}【${payload.gate_id}】刷卡失敗 (${data.reason || '拒絕通行'})`;
-        
-        // Reset animation by removing and re-adding elements
         const oldCircle = failDiv.querySelector('.cross-circle');
         const newCircle = oldCircle.cloneNode(true);
         oldCircle.parentNode.replaceChild(newCircle, oldCircle);
     }
 }
 
-
-
 // ============ SETTINGS ============
 function saveSettings() {
     const apiUrl = document.getElementById('api-url').value.trim();
     const reportUrl = document.getElementById('report-url').value.trim();
-
     state.apiUrl = apiUrl;
     state.reportUrl = reportUrl;
-
     localStorage.setItem('apiUrl', apiUrl);
     localStorage.setItem('reportUrl', reportUrl);
-
     alert('設定已儲存');
 }
 
@@ -294,13 +271,11 @@ async function testServerConnection() {
         const reportStatus = reportTest ? '✓ 連線成功' : '✗ 無法連接';
 
         connectionResult.classList.add(accessTest && reportTest ? 'success' : 'error');
-
         connectionContent.innerHTML = `
             <strong>Access API (Port 8080):</strong> ${accessStatus}<br>
             <strong>Reporting API (Port 8081):</strong> ${reportStatus}<br><br>
             <small>透過 Nginx 反向代理連接後端微服務</small>
         `;
-
         updateServerStatus(accessTest && reportTest);
 
     } catch (error) {
@@ -313,23 +288,35 @@ async function testServerConnection() {
 function updateServerStatus(online) {
     const indicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
-
     indicator.classList.remove('online', 'offline');
     indicator.classList.add(online ? 'online' : 'offline');
     statusText.textContent = online ? '線上' : '離線';
 }
 
 // ============ PERIOD SELECTOR ============
-function initQuarterYearSelect() {
-    const sel = document.getElementById('attendance-quarter-year');
-    if (!sel) return;
+
+/**
+ * 初始化所有需要年份下拉的選單：
+ *   - #attendance-quarter-year  (季模式)
+ *   - #attendance-year          (年模式) ← 新增
+ * 兩者共用同一個填充邏輯，往前推 5 年。
+ */
+function initYearSelects() {
     const thisYear = new Date().getFullYear();
-    for (let y = thisYear; y >= thisYear - 5; y--) {
-        const opt = document.createElement('option');
-        opt.value = y;
-        opt.textContent = y + ' 年';
-        sel.appendChild(opt);
-    }
+    const targets = [
+        document.getElementById('attendance-quarter-year'),
+        document.getElementById('attendance-year'),
+    ];
+    targets.forEach(sel => {
+        if (!sel) return;
+        sel.innerHTML = '';                         // 清空避免重複
+        for (let y = thisYear; y >= thisYear - 5; y--) {
+            const opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y + ' 年';
+            sel.appendChild(opt);
+        }
+    });
 }
 
 function selectPeriod(e) {
@@ -338,14 +325,22 @@ function selectPeriod(e) {
     document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     const period = btn.dataset.period;
-    document.getElementById('picker-day').style.display = period === 'day' ? '' : 'none';
-    document.getElementById('picker-month').style.display = period === 'month' ? '' : 'none';
+
+    // 顯示對應的 picker，其餘隱藏
+    document.getElementById('picker-day').style.display     = period === 'day'     ? '' : 'none';
+    document.getElementById('picker-month').style.display   = period === 'month'   ? '' : 'none';
     document.getElementById('picker-quarter').style.display = period === 'quarter' ? '' : 'none';
-    // Hide trend button whenever period changes — user must re-query
+    document.getElementById('picker-year').style.display    = period === 'year'    ? '' : 'none';
+
+    // 切換維度後隱藏趨勢按鈕，需重新查詢才顯示
     const orgTrendBtn = document.getElementById('btn-org-trend');
     if (orgTrendBtn) orgTrendBtn.style.display = 'none';
 }
 
+/**
+ * 根據當前選中的時間維度，回傳 { period, startDate, endDate }。
+ * year：整年 YYYY-01-01 ~ YYYY-12-31
+ */
 function getPeriodDateRange() {
     const period = document.querySelector('.period-btn.active')?.dataset.period || 'day';
     let startDate = null, endDate = null;
@@ -353,15 +348,17 @@ function getPeriodDateRange() {
     if (period === 'day') {
         const d = document.getElementById('attendance-date-day')?.value;
         startDate = d || null;
-        endDate = d || null;
+        endDate   = d || null;
+
     } else if (period === 'month') {
         const m = document.getElementById('attendance-date-month')?.value;
         if (m) {
             const [y, mo] = m.split('-').map(Number);
             const last = new Date(y, mo, 0).getDate();
             startDate = `${m}-01`;
-            endDate = `${m}-${String(last).padStart(2, '0')}`;
+            endDate   = `${m}-${String(last).padStart(2, '0')}`;
         }
+
     } else if (period === 'quarter') {
         const y = document.getElementById('attendance-quarter-year')?.value;
         const q = parseInt(document.getElementById('attendance-quarter-q')?.value || '1');
@@ -370,9 +367,17 @@ function getPeriodDateRange() {
             const em = q * 3;
             const last = new Date(parseInt(y), em, 0).getDate();
             startDate = `${y}-${String(sm).padStart(2, '0')}-01`;
-            endDate = `${y}-${String(em).padStart(2, '0')}-${last}`;
+            endDate   = `${y}-${String(em).padStart(2, '0')}-${last}`;
+        }
+
+    } else if (period === 'year') {
+        const y = document.getElementById('attendance-year')?.value;
+        if (y) {
+            startDate = `${y}-01-01`;
+            endDate   = `${y}-12-31`;
         }
     }
+
     return { period, startDate, endDate };
 }
 
@@ -388,12 +393,13 @@ async function fetchAttendance() {
     }
 
     if (!startDate) {
-        const labels = { day: '日期', month: '月份', quarter: '季度' };
+        const labels = { day: '日期', month: '月份', quarter: '季度', year: '年份' };
         displayAttendanceError(`請選擇${labels[period] || '日期'}`);
         return;
     }
 
-    const isAggregated = (period === 'month' || period === 'quarter');
+    // 月、季、年 → 使用聚合 endpoint
+    const isAggregated = (period === 'month' || period === 'quarter' || period === 'year');
 
     try {
         if (mode === 'org') {
@@ -435,7 +441,10 @@ async function fetchAttendance() {
 function buildAttendanceHeader(period, mode) {
     const thead = document.getElementById('attendance-thead');
     if (!thead) return;
-    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : '';
+
+    // 表頭前綴：月／季／年
+    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : period === 'year' ? '年' : '';
+
     if (period === 'day') {
         if (mode === 'self') {
             thead.innerHTML = `<tr>
@@ -449,6 +458,7 @@ function buildAttendanceHeader(period, mode) {
             </tr>`;
         }
     } else {
+        // month / quarter / year 共用聚合欄位
         if (mode === 'self') {
             thead.innerHTML = `<tr>
                 <th>員工 ID</th><th>姓名</th><th>身分</th><th>部門</th>
@@ -477,13 +487,13 @@ function displayAttendanceReport(reports, scope, mode, period) {
 
     buildAttendanceHeader(period, mode);
 
-    const selfDayColCount = 6;
+    const selfDayColCount    = 6;
     const selfPeriodColCount = 6;
-    const orgDayColCount = 9;
-    const orgPeriodColCount = 8;
+    const orgDayColCount     = 9;
+    const orgPeriodColCount  = 8;
     const colCount = mode === 'self'
         ? (period === 'day' ? selfDayColCount : selfPeriodColCount)
-        : (period === 'day' ? orgDayColCount : orgPeriodColCount);
+        : (period === 'day' ? orgDayColCount  : orgPeriodColCount);
 
     if (!reports || reports.length === 0) {
         statsContainer.innerHTML = '<p class="placeholder">無資料</p>';
@@ -491,9 +501,9 @@ function displayAttendanceReport(reports, scope, mode, period) {
         return;
     }
 
-    // Stats — day mode uses swipe_count/stay_hours; aggregated uses total_swipes/total_stay_hours
-    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : '';
-    const isAggregated = (period === 'month' || period === 'quarter');
+    // 統計列：月/季/年 → isAggregated
+    const prefix = period === 'month' ? '月' : period === 'quarter' ? '季' : period === 'year' ? '年' : '';
+    const isAggregated = (period === 'month' || period === 'quarter' || period === 'year');
     const uniqueEmployees = isAggregated
         ? reports.length
         : new Set(reports.map(r => r.employee_id)).size;
@@ -508,7 +518,7 @@ function displayAttendanceReport(reports, scope, mode, period) {
         `;
     } else {
         const swipeLabel = prefix ? `${prefix}總刷卡次數` : '總刷卡次數';
-        const stayLabel = prefix ? `${prefix}總停留時數` : '總停留時數';
+        const stayLabel  = prefix ? `${prefix}總停留時數` : '總停留時數';
         statsContainer.innerHTML = `
             <div class="stat-item"><div class="stat-item-value">${totalSwipes}</div><div class="stat-item-label">${swipeLabel}</div></div>
             <div class="stat-item"><div class="stat-item-value">${totalStayHours} hr</div><div class="stat-item-label">${stayLabel}</div></div>
@@ -531,6 +541,7 @@ function displayAttendanceReport(reports, scope, mode, period) {
             </tr>`;
         }).join('');
     } else {
+        // month / quarter / year 共用聚合列渲染
         tbody.innerHTML = reports.map(e => {
             const identity = getRoleBadge(e);
             if (mode === 'self') {
@@ -612,17 +623,12 @@ function buildLineChart(canvasId, labels, datasets) {
     const chartOptions = {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#f1f5f9' } } },
-        scales: {
-            x: { ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' } }
-        }
+        scales: { x: { ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' } } }
     };
     if (datasets.length === 1) {
-        chartOptions.scales.y = {
-            beginAtZero: true,
-            ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }
-        };
+        chartOptions.scales.y = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' } };
     } else {
-        chartOptions.scales.y = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }, position: 'left' };
+        chartOptions.scales.y  = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { color: 'rgba(71,85,105,0.2)' }, position: 'left' };
         chartOptions.scales.y1 = { beginAtZero: true, ticks: { color: '#f1f5f9' }, grid: { drawOnChartArea: false }, position: 'right' };
     }
     state.modalChart = new Chart(ctx, { type: 'line', data: { labels, datasets }, options: chartOptions });
@@ -661,46 +667,35 @@ async function showDayAuditModal(employeeId, name, date) {
         }
 
         const sorted = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
         const header = `
             <div class="audit-header-row">
-                <span>#</span>
-                <span>時間</span>
-                <span>方向</span>
-                <span>廠區</span>
-                <span>閘門</span>
-                <span>狀態</span>
-                <span>備註</span>
+                <span>#</span><span>時間</span><span>方向</span>
+                <span>廠區</span><span>閘門</span><span>狀態</span><span>備註</span>
             </div>`;
-
         const rows = sorted.map((e, i) => {
-            const time = formatTimeDetailed(e.timestamp);
+            const time    = formatTimeDetailed(e.timestamp);
             const dirIcon = e.direction === 'IN' ? '📥 進入' : '📤 離開';
-            const site = e.site_id || '-';
-            const gate = e.gate_id || '-';
-            const ok = e.status === 'SUCCESS';
+            const ok      = e.status === 'SUCCESS';
             const statusHtml = ok
                 ? '<span class="audit-status ok">✅ 成功</span>'
                 : '<span class="audit-status fail">❌ 失敗</span>';
-            const reason = e.reason || '-';
             return `<div class="audit-event-row ${ok ? '' : 'audit-row-fail'}">
                 <span class="audit-seq">#${i + 1}</span>
                 <span class="audit-time">${time}</span>
                 <span class="audit-dir">${dirIcon}</span>
-                <span class="audit-site">${site}</span>
-                <span class="audit-gate">${gate}</span>
+                <span class="audit-site">${e.site_id || '-'}</span>
+                <span class="audit-gate">${e.gate_id || '-'}</span>
                 <span>${statusHtml}</span>
-                <span class="audit-reason">${reason}</span>
+                <span class="audit-reason">${e.reason || '-'}</span>
             </div>`;
         }).join('');
-
         setModalContent(`<div class="audit-trail-container">${header}${rows}</div>`);
     } catch (err) {
         setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`);
     }
 }
 
-// ============ MONTH/QUARTER MODE: PERSONAL TREND ============
+// ============ MONTH/QUARTER/YEAR MODE: PERSONAL TREND ============
 function showPersonalTrendModal(employeeId, name) {
     openModal(`📈 ${name}（${employeeId}）出勤趨勢`);
 
@@ -717,19 +712,15 @@ function showPersonalTrendModal(employeeId, name) {
     `;
 
     if (period === 'day') {
-        // Day mode: reuse cached daily rows from last query
         const dailyData = (state.lastReports || [])
             .filter(r => r.employee_id === employeeId)
             .sort((a, b) => a.work_date.localeCompare(b.work_date));
-        if (!dailyData.length) {
-            setModalContent('<p class="modal-loading">無資料</p>');
-            return;
-        }
+        if (!dailyData.length) { setModalContent('<p class="modal-loading">無資料</p>'); return; }
         state.modalPersonalData = dailyData;
         setModalContent(chartHtml);
         requestAnimationFrame(() => reRenderPersonalChart());
     } else {
-        // Month/quarter mode: fetch fresh per-day data from attendance endpoint
+        // month / quarter / year：撈逐日明細後畫趨勢線
         const url = `${getReportUrl()}/v1/reports/attendance?as=${employeeId}&start_date=${startDate}&end_date=${endDate}`;
         fetch(url)
             .then(r => r.json())
@@ -737,17 +728,12 @@ function showPersonalTrendModal(employeeId, name) {
                 const dailyData = (Array.isArray(data) ? data : [])
                     .filter(r => r.employee_id === employeeId)
                     .sort((a, b) => a.work_date.localeCompare(b.work_date));
-                if (!dailyData.length) {
-                    setModalContent('<p class="modal-loading">無資料</p>');
-                    return;
-                }
+                if (!dailyData.length) { setModalContent('<p class="modal-loading">無資料</p>'); return; }
                 state.modalPersonalData = dailyData;
                 setModalContent(chartHtml);
                 requestAnimationFrame(() => reRenderPersonalChart());
             })
-            .catch(err => {
-                setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`);
-            });
+            .catch(err => setModalContent(`<div class="error-inline" style="padding:20px;">❌ ${err.message}</div>`));
     }
 }
 
@@ -755,22 +741,18 @@ function reRenderPersonalChart() {
     const dailyData = state.modalPersonalData;
     if (!dailyData || !dailyData.length) return;
     const metric = document.getElementById('personal-trend-metric')?.value || 'swipe_count';
-
     const metricCfg = {
         swipe_count: { label: '刷卡次數',      yTitle: '次數',       color: '#3b82f6' },
         stay_hours:  { label: '停留時數 (hrs)', yTitle: '時數 (hrs)', color: '#10b981' },
     };
     const cfg = metricCfg[metric];
-
     if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
     const ctx = document.getElementById('modal-personal-chart');
     if (!ctx) return;
-
     const labels = dailyData.map(r => r.work_date);
     const data   = dailyData.map(r => metric === 'swipe_count'
         ? (r.swipe_count || 0)
         : parseFloat((r.stay_hours || 0).toFixed(2)));
-
     state.modalChart = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets: [{ label: cfg.label, data, borderColor: cfg.color, backgroundColor: cfg.color + '22', tension: 0.4, fill: true, pointRadius: 4 }] },
@@ -794,15 +776,12 @@ async function showOrgTrend() {
     const { period, startDate, endDate } = getPeriodDateRange();
     openModal(`📈 底下組織趨勢分析 — ${scope}`);
 
-    // orgSize from the already-fetched lastReports (today's org snapshot)
     const orgSize = new Set((state.lastReports || []).map(r => r.employee_id)).size || 1;
     state.modalOrgPeriod = period;
 
     if (period === 'day') {
-        // ── Day mode: bar chart per employee from state.lastReports ──
         const reports = state.lastReports || [];
         state.modalTrendData = { type: 'day', reports, orgSize };
-
         const byDate = {};
         for (const r of reports) {
             if (!byDate[r.work_date]) byDate[r.work_date] = { swipes: 0, persons: new Set(), stay: 0 };
@@ -820,8 +799,8 @@ async function showOrgTrend() {
         `);
 
     } else {
-        // ── Month/Quarter: call trend API for daily buckets ──────────
-        const periodLabel = period === 'quarter' ? '季' : '月';
+        // month / quarter / year → 呼叫 trend API，x 軸為 daily bucket
+        const periodLabel = period === 'quarter' ? '季' : period === 'year' ? '年' : '月';
         try {
             let url = `${getReportUrl()}/v1/reports/trend?period=day&as=${managerId}`;
             if (startDate) url += `&start_date=${startDate}`;
@@ -835,15 +814,11 @@ async function showOrgTrend() {
             const summary = data.summary || {};
             state.modalTrendData = { type: 'trend', trends };
 
-            const pAvgSwipes  = (summary.avg_swipes_per_person || 0).toFixed(2);
-            const pAvgPersons = (summary.avg_head_count || 0).toFixed(1);
-            const pAvgStay    = (summary.avg_stay_hrs || 0).toFixed(2);
-
             setModalContent(`
                 <div class="stats-grid stats-grid-mb">
-                    <div class="stat-item"><div class="stat-item-value">${pAvgSwipes}</div><div class="stat-item-label">${periodLabel}平均刷卡次數</div></div>
-                    <div class="stat-item"><div class="stat-item-value">${pAvgPersons}</div><div class="stat-item-label">${periodLabel}平均出勤人數</div></div>
-                    <div class="stat-item"><div class="stat-item-value">${pAvgStay}</div><div class="stat-item-label">${periodLabel}平均停留時數 (hrs)</div></div>
+                    <div class="stat-item"><div class="stat-item-value">${(summary.avg_swipes_per_person || 0).toFixed(2)}</div><div class="stat-item-label">${periodLabel}平均刷卡次數</div></div>
+                    <div class="stat-item"><div class="stat-item-value">${(summary.avg_head_count || 0).toFixed(1)}</div><div class="stat-item-label">${periodLabel}平均出勤人數</div></div>
+                    <div class="stat-item"><div class="stat-item-value">${(summary.avg_stay_hrs || 0).toFixed(2)}</div><div class="stat-item-label">${periodLabel}平均停留時數 (hrs)</div></div>
                 </div>
                 <div class="metric-control">
                     <label>${periodLabel}顯示指標</label>
@@ -865,19 +840,16 @@ async function showOrgTrend() {
 function reRenderOrgChart() {
     const td = state.modalTrendData;
     if (!td) return;
-    const period = state.modalOrgPeriod || 'day';
     const metric = document.getElementById('org-trend-metric')?.value || 'avg_swipe';
-
     const metricCfg = {
         avg_swipe: { label: '平均刷卡次數',      yTitle: '次數',       color: '#3b82f6' },
         persons:   { label: '出勤人數',           yTitle: '人數 (人)',   color: '#10b981' },
         avg_stay:  { label: '平均停留時數 (hrs)', yTitle: '時數 (hrs)', color: '#fbbf24' },
     };
     const cfg = metricCfg[metric] || metricCfg.avg_swipe;
-
     if (state.modalChart) { state.modalChart.destroy(); state.modalChart = null; }
     const ctx = document.getElementById('modal-org-chart');
-    if (!ctx) { console.warn('[reRenderOrgChart] canvas #modal-org-chart not found'); return; }
+    if (!ctx) { console.warn('[reRenderOrgChart] canvas not found'); return; }
 
     const chartBase = {
         responsive: true, maintainAspectRatio: false,
@@ -889,45 +861,33 @@ function reRenderOrgChart() {
     };
 
     if (td.type === 'day') {
-        // Bar chart: one bar per employee (from lastReports)
-        // Day mode renders only stat cards — no chart needed
-        return;
-    } else {
-        // Line chart: x = date bucket, from trend API data
-        const { trends } = td;
-        const labels = trends.map(t => t.bucket);
-        const data = trends.map(t => {
-            if (metric === 'avg_swipe') return t.head_count > 0 ? parseFloat(((t.total_swipes || 0) / t.head_count).toFixed(2)) : 0;
-            if (metric === 'persons')   return t.head_count || 0;
-            return parseFloat((t.avg_stay_hrs || 0).toFixed(2));
-        });
-        state.modalChart = new Chart(ctx, {
-            type: 'line',
-            data: { labels, datasets: [{ label: cfg.label, data, borderColor: cfg.color, backgroundColor: cfg.color + '22', tension: 0.4, fill: true, pointRadius: 3 }] },
-            options: chartBase
-        });
+        return; // 日模式只顯示統計卡，不畫圖
     }
+
+    const { trends } = td;
+    const labels = trends.map(t => t.bucket);
+    const data = trends.map(t => {
+        if (metric === 'avg_swipe') return t.head_count > 0 ? parseFloat(((t.total_swipes || 0) / t.head_count).toFixed(2)) : 0;
+        if (metric === 'persons')   return t.head_count || 0;
+        return parseFloat((t.avg_stay_hrs || 0).toFixed(2));
+    });
+    state.modalChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets: [{ label: cfg.label, data, borderColor: cfg.color, backgroundColor: cfg.color + '22', tension: 0.4, fill: true, pointRadius: 3 }] },
+        options: chartBase
+    });
 }
 
 // ============ ALERTS ============
 async function fetchAlerts() {
     const severity = document.getElementById('alert-severity')?.value;
-    
     try {
         let url = `${getReportUrl()}/v1/alerts`;
-        if (severity) {
-            url += `?severity=${severity}`;
-        }
-        
+        if (severity) url += `?severity=${severity}`;
         const response = await fetch(url);
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || '查詢失敗');
-        }
-        
+        if (!response.ok) throw new Error(data.error || '查詢失敗');
         displayAlerts(data);
-        
     } catch (error) {
         alert('警報查詢失敗: ' + error.message);
     }
@@ -936,21 +896,13 @@ async function fetchAlerts() {
 function displayAlerts(alerts) {
     const container = document.getElementById('alerts-list');
     if (!container) return;
-    
     if (!alerts || alerts.length === 0) {
         container.innerHTML = '<p class="placeholder">暫無警報</p>';
         return;
     }
-    
     container.innerHTML = alerts.map(alert => {
         const severityClass = alert.severity.toLowerCase();
-        const severityIcon = {
-            'critical': '🔴',
-            'high': '🟠',
-            'medium': '🟡',
-            'low': '🟢'
-        }[severityClass] || '⚠️';
-        
+        const severityIcon = { 'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🟢' }[severityClass] || '⚠️';
         return `
             <div class="alert-item ${severityClass}">
                 <div class="alert-header">
@@ -970,31 +922,19 @@ function displayAlerts(alerts) {
 // ============ DEV LOGIN ============
 async function devLogin() {
     const badge = document.getElementById('dev-login-badge')?.value?.trim();
-    
-    if (!badge) {
-        alert('請輸入員工ID');
-        return;
-    }
-    
+    if (!badge) { alert('請輸入員工ID'); return; }
     try {
         const response = await fetch(`${getReportUrl()}/v1/dev/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ badge_id: badge })
         });
-        
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || '登入失敗');
-        }
-        
+        if (!response.ok) throw new Error(data.error || '登入失敗');
         state.token = data.access_token;
         state.currentBadge = badge;
-
         localStorage.setItem('pacs_token', data.access_token);
         localStorage.setItem('current_badge', badge);
-
         const tokenInfo = document.getElementById('token-info');
         if (tokenInfo) {
             tokenInfo.innerHTML = `
@@ -1004,9 +944,7 @@ async function devLogin() {
                 有效期: ${Math.floor(data.expires_in / 3600)} 小時
             `;
         }
-
         updateProfileDisplay(badge);
-        
     } catch (error) {
         alert('登入失敗: ' + error.message);
     }
@@ -1021,21 +959,15 @@ function updateProfileDisplay(badge) {
 function formatTime(timeString) {
     if (!timeString) return '-';
     try {
-        const date = new Date(timeString);
-        return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-        return timeString;
-    }
+        return new Date(timeString).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    } catch { return timeString; }
 }
 
 function formatTimeDetailed(timeString) {
     if (!timeString) return '-';
     try {
-        const date = new Date(timeString);
-        return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch {
-        return timeString;
-    }
+        return new Date(timeString).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch { return timeString; }
 }
 
 function getDateDaysAgo(days) {
@@ -1048,14 +980,13 @@ function getDateDaysAgo(days) {
 window.addEventListener('load', () => {
     const today = new Date().toISOString().split('T')[0];
     const attendanceDateInput = document.getElementById('attendance-date');
-    const managerDateInput = document.getElementById('manager-date');
-    const trendStartInput = document.getElementById('trend-start');
-    const trendEndInput = document.getElementById('trend-end');
-    
+    const managerDateInput    = document.getElementById('manager-date');
+    const trendStartInput     = document.getElementById('trend-start');
+    const trendEndInput       = document.getElementById('trend-end');
     if (attendanceDateInput) attendanceDateInput.value = today;
-    if (managerDateInput) managerDateInput.value = today;
-    if (trendStartInput) trendStartInput.value = getDateDaysAgo(7);
-    if (trendEndInput) trendEndInput.value = today;
+    if (managerDateInput)    managerDateInput.value    = today;
+    if (trendStartInput)     trendStartInput.value     = getDateDaysAgo(7);
+    if (trendEndInput)       trendEndInput.value       = today;
 });
 
 // Periodically test connection every 30 seconds
