@@ -1,327 +1,292 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PACS — 門禁管理系統</title>
+    <title>PACS - 門禁管理系統</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
+
 <body>
-
-<!-- ── Sidebar ─────────────────────────────── -->
-<aside class="sidebar">
-    <div class="sidebar-brand">
-        <div class="brand-icon">🏭</div>
-        <div class="brand-text">
-            <h2>PACS</h2>
-            <p>門禁管理系統</p>
+    <!-- Navigation Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">🏭</div>
+            <div class="brand-text">
+                <h2>PACS</h2>
+                <p>門禁系統</p>
+            </div>
         </div>
-    </div>
 
-    <nav class="sidebar-nav">
-        <span class="nav-section-label">操作</span>
-        <a href="#" class="nav-item active" data-tab="swipe-tab">
-            <span class="nav-icon">⌗</span>
-            <span class="nav-label">刷卡模擬</span>
-        </a>
-        <span class="nav-section-label">報表</span>
-        <a href="#" class="nav-item" data-tab="attendance-tab">
-            <span class="nav-icon">▤</span>
-            <span class="nav-label">出席報表</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="alerts-tab">
-            <span class="nav-icon">◉</span>
-            <span class="nav-label">警報異常</span>
-        </a>
-    </nav>
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-tab="swipe-tab">
+                <span class="nav-icon">🔑</span>
+                <span class="nav-label">刷卡模擬</span>
+            </a>
+            <a href="#" class="nav-item" data-tab="attendance-tab">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">出席報表</span>
+            </a>
+            <a href="#" class="nav-item" data-tab="alerts-tab">
+                <span class="nav-icon">⚠️</span>
+                <span class="nav-label">警報異常</span>
+            </a>
+        </nav>
+    </aside>
 
-    <div class="sidebar-footer">
-        <div class="server-status-mini server-status">
-            <span id="status-indicator" class="status-dot offline"></span>
-            <span id="status-text" style="font-family:var(--mono);font-size:12px;color:var(--muted);">離線</span>
-        </div>
-    </div>
-</aside>
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <h1 id="page-title">刷卡模擬器</h1>
+            </div>
+            <div class="header-right">
+                <div class="server-status">
+                    <span id="status-indicator" class="status-dot offline"></span>
+                    <span id="status-text">離線</span>
+                </div>
+            </div>
+        </header>
 
-<!-- ── Main ────────────────────────────────── -->
-<main class="main-content">
-    <header class="top-header">
-        <div class="header-left">
-            <h1 id="page-title">刷卡模擬</h1>
-        </div>
-        <div class="header-right">
-            <span id="profile-name" style="font-size:12.5px;font-family:var(--mono);color:var(--muted);"></span>
-        </div>
-    </header>
+        <!-- Content Container -->
+        <div class="content-container">
+            <!-- 1. Swipe Simulator Tab -->
+            <section id="swipe-tab" class="tab-content active">
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>🔑 刷卡模擬器</h3>
+                        </div>
 
-    <div class="content-container">
+                        <div class="form-row form-row-spaced">
+                            <div class="form-group flex-1 mr-15">
+                                <label for="site-id">廠區</label>
+                                <select id="site-id">
+                                    <option value="FAB12A">FAB12A</option>
+                                    <option value="FAB12B">FAB12B</option>
+                                    <option value="HQ">總部</option>
+                                </select>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="badge-id">員工證件 ID</label>
+                                <input type="text" id="badge-id" placeholder="例: B-000001、B-000152" value="B-050000">
+                            </div>
+                        </div>
 
-        <!-- 1 · Swipe Tab -->
-        <section id="swipe-tab" class="tab-content active">
-            <div class="card-grid">
+                        <!-- Gate Selection (2-tier) -->
+                        <div class="gate-section">
+                            <h4>選擇閘門與位置</h4>
+                            <div class="tier-selector">
+                                <button class="tier-btn active" data-tier="outer">
+                                    <span class="tier-icon">1️⃣</span>
+                                    <span class="tier-label">外層門禁<br /><small>(1-A, 1-B, 1-C)</small></span>
+                                </button>
+                                <button class="tier-btn" data-tier="inner">
+                                    <span class="tier-icon">2️⃣</span>
+                                    <span class="tier-label">內層門禁<br /><small>(2-A, 2-B, 2-C)</small></span>
+                                </button>
+                            </div>
+                        </div>
 
-                <!-- Input Card -->
+                        <!-- Form -->
+                        <div class="form-section">
+                            <div class="form-group">
+                                <label for="gate-id">閘門</label>
+                                <select id="gate-id">
+                                    <option value="Gate-1A">Gate-1A (外層)</option>
+                                    <option value="Gate-1B">Gate-1B (外層)</option>
+                                    <option value="Gate-1C">Gate-1C (外層)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>進出方向</label>
+                                <div class="direction-buttons">
+                                    <button class="direction-btn in active" data-direction="IN">
+                                        <span class="btn-icon">📥</span> 進入
+                                    </button>
+                                    <button class="direction-btn out" data-direction="OUT">
+                                        <span class="btn-icon">📤</span> 離開
+                                    </button>
+                                </div>
+                            </div>
+
+                            <button id="btn-swipe" class="btn btn-primary btn-lg">
+                                🔄 送出刷卡請求
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Response Panel -->
+                    <div class="card response-card">
+                        <div class="card-header">
+                            <h3>📋 系統回應</h3>
+                        </div>
+                        <div id="swipe-animation-container" class="animation-container">
+                            <div id="swipe-idle" class="swipe-status idle">
+                                <span class="status-icon">⏳</span>
+                                <p>等待刷卡中...</p>
+                            </div>
+                            <div id="swipe-success" class="swipe-status success hidden">
+                                <div class="checkmark-circle">
+                                    <div class="background"></div>
+                                    <div class="checkmark draw"></div>
+                                </div>
+                                <p id="swipe-success-msg">允許進入</p>
+                            </div>
+                            <div id="swipe-fail" class="swipe-status fail hidden">
+                                <div class="cross-circle">
+                                    <div class="background"></div>
+                                    <div class="cross draw"></div>
+                                </div>
+                                <p id="swipe-fail-msg">拒絕進入</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Attendance Report Tab -->
+            <section id="attendance-tab" class="tab-content">
                 <div class="card">
                     <div class="card-header">
-                        <div>
-                            <h3>刷卡請求</h3>
-                            <p class="card-meta">模擬員工進出廠區</p>
-                        </div>
+                        <h3>📊 出席報表</h3>
+                        <p></p>
                     </div>
 
-                    <div class="form-row form-row-spaced">
-                        <div class="form-group">
-                            <label>廠區</label>
-                            <select id="site-id">
-                                <option value="Fab12">Fab12</option>
-                                <option value="Fab15">Fab15</option>
-                                <option value="總部">總部</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>員工證件 ID</label>
-                            <input type="text" id="badge-id" placeholder="B001" value="B001">
-                        </div>
-                    </div>
-
-                    <div class="gate-section">
-                        <h4>閘門層級</h4>
-                        <div class="tier-selector">
-                            <button class="tier-btn active" data-tier="outer">
-                                <span class="tier-icon">①</span>
-                                <span class="tier-label">外層門禁 <small>Gate-1A / 1B / 1C</small></span>
-                            </button>
-                            <button class="tier-btn" data-tier="inner">
-                                <span class="tier-icon">②</span>
-                                <span class="tier-label">內層門禁 <small>Gate-2A / 2B / 2C</small></span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <div class="form-group">
-                            <label>閘門</label>
-                            <select id="gate-id">
-                                <option value="Gate-1A">Gate-1A（外層）</option>
-                                <option value="Gate-1B">Gate-1B（外層）</option>
-                                <option value="Gate-1C">Gate-1C（外層）</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label>進出方向</label>
-                            <div class="direction-buttons">
-                                <button class="direction-btn in active" data-direction="IN">
-                                    <span class="btn-icon">↓</span> 進入
-                                </button>
-                                <button class="direction-btn out" data-direction="OUT">
-                                    <span class="btn-icon">↑</span> 離開
-                                </button>
+                    <div class="filter-section filter-section-wrap">
+                        <div class="form-group form-group-full">
+                            <label>查詢模式</label>
+                            <div class="mode-selector">
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="self" checked>
+                                    <span>👤 自己的出缺席</span>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="attendance-mode" value="org">
+                                    <span>🏢 底下組織</span>
+                                </label>
                             </div>
                         </div>
-
-                        <button id="btn-swipe" class="btn btn-primary btn-lg">
-                            送出刷卡請求
+                        <div class="form-group">
+                            <label for="attendance-employee-id">員工 ID</label>
+                            <input type="text" id="attendance-employee-id" placeholder="例: B-000001" value="B-000001" required>
+                        </div>
+                        <div class="form-group">
+                            <label>時間維度</label>
+                            <div class="period-type-selector">
+                                <button class="period-btn active" data-period="day">日</button>
+                                <button class="period-btn" data-period="month">月</button>
+                                <button class="period-btn" data-period="quarter">季</button>
+                            </div>
+                        </div>
+                        <div class="form-group" id="picker-day">
+                            <label for="attendance-date-day">選擇日期</label>
+                            <input type="date" id="attendance-date-day">
+                        </div>
+                        <div class="form-group" id="picker-month" style="display:none;">
+                            <label for="attendance-date-month">選擇月份</label>
+                            <input type="month" id="attendance-date-month">
+                        </div>
+                        <div class="form-group" id="picker-quarter" style="display:none;">
+                            <label>選擇季度</label>
+                            <div class="quarter-select-row">
+                                <select id="attendance-quarter-year"></select>
+                                <select id="attendance-quarter-q">
+                                    <option value="1">Q1（1-3月）</option>
+                                    <option value="2">Q2（4-6月）</option>
+                                    <option value="3">Q3（7-9月）</option>
+                                    <option value="4">Q4（10-12月）</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button id="btn-fetch-attendance" class="btn btn-primary">
+                            📥 查詢
+                        </button>
+                        <button id="btn-export-attendance" class="btn btn-secondary">
+                            📥 下載 Excel
+                        </button>
+                        <button id="btn-org-trend" class="btn btn-info" style="display:none;">
+                            📈 底下組織趨勢
                         </button>
                     </div>
-                </div>
 
-                <!-- Response Card -->
-                <div class="card response-card">
+                    <div id="attendance-response" class="response-box">
+                        <div id="attendance-scope-bar" class="manager-scope-display" style="display:none;">
+                            <div class="scope-info">
+                                <span>管理部門: </span>
+                                <strong id="attendance-scope">-</strong>
+                            </div>
+                        </div>
+                        <div id="attendance-stats" class="stats-grid"></div>
+                        <div class="table-wrapper">
+                            <table class="table" id="attendance-table">
+                                <thead id="attendance-thead"></thead>
+                                <tbody id="attendance-tbody">
+                                    <tr class="empty">
+                                        <td colspan="9">選擇查詢模式後點擊「查詢」</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- 5. Alerts Tab -->
+            <section id="alerts-tab" class="tab-content">
+                <div class="card">
                     <div class="card-header">
-                        <div>
-                            <h3>系統回應</h3>
-                            <p class="card-meta">即時反饋</p>
-                        </div>
-                    </div>
-                    <div id="swipe-animation-container" class="animation-container">
-                        <div id="swipe-idle" class="swipe-status idle">
-                            <div class="idle-indicator">⏳</div>
-                            <p>等待刷卡請求</p>
-                        </div>
-                        <div id="swipe-success" class="swipe-status success hidden">
-                            <div class="checkmark-circle">
-                                <div class="background"></div>
-                                <div class="checkmark draw"></div>
-                            </div>
-                            <p id="swipe-success-msg">允許通行</p>
-                        </div>
-                        <div id="swipe-fail" class="swipe-status fail hidden">
-                            <div class="cross-circle">
-                                <div class="background"></div>
-                                <div class="cross draw"></div>
-                            </div>
-                            <p id="swipe-fail-msg">拒絕通行</p>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </section>
-
-        <!-- 2 · Attendance Tab -->
-        <section id="attendance-tab" class="tab-content">
-            <div class="card">
-                <div class="card-header">
-                    <div>
-                        <h3>出席報表</h3>
-                        <p class="card-meta">查詢個人或組織出勤紀錄</p>
-                    </div>
-                    <div style="display:flex;gap:8px;">
-                        <button id="btn-export-attendance" class="btn btn-secondary btn-sm">↓ 下載 Excel</button>
-                        <button id="btn-org-trend" class="btn btn-sm" style="display:none;">組織趨勢 →</button>
-                    </div>
-                </div>
-
-                <div class="filter-section filter-section-wrap">
-                    <div class="form-group form-group-full">
-                        <label>查詢模式</label>
-                        <div class="mode-selector">
-                            <label class="mode-option">
-                                <input type="radio" name="attendance-mode" value="self" checked>
-                                <span>個人出缺席</span>
-                            </label>
-                            <label class="mode-option">
-                                <input type="radio" name="attendance-mode" value="org">
-                                <span>底下組織</span>
-                            </label>
-                        </div>
+                        <h3>⚠️ 警報異常</h3>
+                        <p>系統檢測到的異常行為與安全警報</p>
                     </div>
 
-                    <div class="form-group">
-                        <label>員工 ID</label>
-                        <input type="text" id="attendance-employee-id" placeholder="B001">
-                    </div>
-
-                    <div class="form-group">
-                        <label>時間維度</label>
-                        <div class="period-type-selector">
-                            <button class="period-btn active" data-period="day">日</button>
-                            <button class="period-btn" data-period="month">月</button>
-                            <button class="period-btn" data-period="quarter">季</button>
-                            <button class="period-btn" data-period="year">年</button>
-                        </div>
-                    </div>
-
-                    <div class="form-group" id="picker-day">
-                        <label>日期</label>
-                        <input type="date" id="attendance-date-day">
-                    </div>
-                    <div class="form-group" id="picker-month" style="display:none;">
-                    <label>月份</label>
-                        <div class="quarter-select-row">
-                            <select id="attendance-month-year"></select>
-                            <select id="attendance-month-m">
-                                <option value="01">1 月</option>
-                                <option value="02">2 月</option>
-                                <option value="03">3 月</option>
-                                <option value="04">4 月</option>
-                                <option value="05">5 月</option>
-                                <option value="06">6 月</option>
-                                <option value="07">7 月</option>
-                                <option value="08">8 月</option>
-                                <option value="09">9 月</option>
-                                <option value="10">10 月</option>
-                                <option value="11">11 月</option>
-                                <option value="12">12 月</option>
+                    <div class="filter-section">
+                        <div class="form-group">
+                            <label for="alert-severity">嚴重程度</label>
+                            <select id="alert-severity">
+                                <option value="">全部</option>
+                                <option value="CRITICAL">🔴 嚴重</option>
+                                <option value="HIGH">🟠 高</option>
+                                <option value="MEDIUM">🟡 中</option>
+                                <option value="LOW">🟢 低</option>
                             </select>
                         </div>
+                        <button id="btn-fetch-alerts" class="btn btn-primary">
+                            🔄 刷新警報
+                        </button>
                     </div>
-                    <div class="form-group" id="picker-quarter" style="display:none;">
-                        <label>季度</label>
-                        <div class="quarter-select-row">
-                            <select id="attendance-quarter-year"></select>
-                            <select id="attendance-quarter-q">
-                                <option value="1">Q1（1–3月）</option>
-                                <option value="2">Q2（4–6月）</option>
-                                <option value="3">Q3（7–9月）</option>
-                                <option value="4">Q4（10–12月）</option>
-                            </select>
+
+                    <div id="alerts-response" class="response-box">
+                        <div id="alerts-list" class="alerts-container">
+                            <p class="placeholder">點擊「刷新警報」以載入資料</p>
                         </div>
                     </div>
-                    <div class="form-group" id="picker-year" style="display:none;">
-                        <label>年份</label>
-                        <select id="attendance-year"></select>
-                    </div>
-
-                    <button id="btn-fetch-attendance" class="btn btn-primary">查詢</button>
                 </div>
+            </section>
 
-                <div id="attendance-response" class="response-box">
-                    <div id="attendance-scope-bar" class="manager-scope-display" style="display:none;">
-                        <div class="scope-info">
-                            <span>管理部門</span>
-                            <strong id="attendance-scope">—</strong>
-                        </div>
-                    </div>
-                    <div id="attendance-stats" class="stats-grid"></div>
-                    <div class="table-wrapper">
-                        <table class="table" id="attendance-table">
-                            <thead id="attendance-thead"></thead>
-                            <tbody id="attendance-tbody">
-                                <tr class="empty">
-                                    <td colspan="9" style="text-align:center;padding:40px;color:var(--muted);font-size:13px;">
-                                        選擇條件後點擊「查詢」
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 3 · Alerts Tab -->
-        <section id="alerts-tab" class="tab-content">
-            <div class="card">
-                <div class="card-header">
-                    <div>
-                        <h3>警報異常</h3>
-                        <p class="card-meta">系統檢測到的異常行為與安全事件</p>
-                    </div>
-                </div>
-
-                <div class="filter-section">
-                    <div class="form-group">
-                        <label>嚴重程度</label>
-                        <select id="alert-severity">
-                            <option value="">全部</option>
-                            <option value="CRITICAL">嚴重</option>
-                            <option value="HIGH">高</option>
-                            <option value="MEDIUM">中</option>
-                            <option value="LOW">低</option>
-                        </select>
-                    </div>
-                    <button id="btn-fetch-alerts" class="btn btn-primary">更新警報</button>
-                </div>
-
-                <div id="alerts-response" class="response-box" style="border:none;padding:0;">
-                    <div id="alerts-list" class="alerts-container">
-                        <p class="placeholder">點擊「更新警報」以載入資料</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-
-    </div>
-</main>
-
-<!-- ── Modal ──────────────────────────────── -->
-<div id="trend-modal" class="modal-overlay" style="display:none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="trend-modal-title">分析</h3>
-            <button id="btn-close-trend-modal" class="modal-close">✕</button>
         </div>
-        <div id="trend-modal-body" class="modal-body">
-            <div id="trend-modal-loading" class="modal-loading">載入中…</div>
+    </main>
+
+    <!-- Trend / Audit Modal -->
+    <div id="trend-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="trend-modal-title">📈 分析</h3>
+                <button id="btn-close-trend-modal" class="modal-close">✕</button>
+            </div>
+            <div id="trend-modal-body" class="modal-body">
+                <div id="trend-modal-loading" class="modal-loading">載入中...</div>
+            </div>
         </div>
     </div>
-</div>
 
-<script src="app.js"></script>
+    <script src="app.js"></script>
 </body>
+
 </html>
