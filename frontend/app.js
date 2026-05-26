@@ -306,10 +306,11 @@ function initYearSelects() {
     const targets = [
         document.getElementById('attendance-quarter-year'),
         document.getElementById('attendance-year'),
+        document.getElementById('attendance-month-year'),  // ← 新增這行
     ];
     targets.forEach(sel => {
         if (!sel) return;
-        sel.innerHTML = '';                         // 清空避免重複
+        sel.innerHTML = '';
         for (let y = thisYear; y >= thisYear - 5; y--) {
             const opt = document.createElement('option');
             opt.value = y;
@@ -351,12 +352,12 @@ function getPeriodDateRange() {
         endDate   = d || null;
 
     } else if (period === 'month') {
-        const m = document.getElementById('attendance-date-month')?.value;
-        if (m) {
-            const [y, mo] = m.split('-').map(Number);
-            const last = new Date(y, mo, 0).getDate();
-            startDate = `${m}-01`;
-            endDate   = `${m}-${String(last).padStart(2, '0')}`;
+        const y  = document.getElementById('attendance-month-year')?.value;
+        const mo = document.getElementById('attendance-month-m')?.value;
+        if (y && mo) {
+            const last = new Date(parseInt(y), parseInt(mo), 0).getDate();
+            startDate = `${y}-${mo}-01`;
+            endDate   = `${y}-${mo}-${String(last).padStart(2, '0')}`;
         }
 
     } else if (period === 'quarter') {
