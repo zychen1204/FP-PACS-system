@@ -452,20 +452,68 @@ function displayAttendanceError(message) {
 }
 
 async function exportAttendanceExcel() {
-    const { startDate } = getPeriodDateRange();
+    // 假設你的 getPeriodDateRange() 回傳 { startDate, endDate }
+    const { startDate, endDate } = getPeriodDateRange();
+    
     try {
-        let url = `${getReportUrl()}/v1/reports/attendance/export`;
-        if (startDate) url += `?date=${startDate}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('匯出失敗');
+        // 1. 建立安全且符合後端設計的 URL
+        const baseUrl = `${getReportUrl()}/v1/reports/attendance/export`;
+        const urlObj = new URL(baseUrl);
+        
+        // 後端支援 format=excel，雖然是 default 但帶上更明確
+        urlObj.searchParams.append('format', 'excel'); 
+        
+        // 根據後端 resolveDateRange 的邏輯帶入參數
+        if (startDate && endDate) {
+            urlObj.searchParams.append('start_date', startDate);
+            urlObj.searchParams.append('end_date', endDate);
+        } else if (startDate) {
+            urlObj.searchParams.append('date', startDate);
+        }
+
+        // 2. 發送請求（若有實作 JWT，記得在 headers 補上 Authorization）
+        const response = await fetch(urlObj.toString(), {
+            method: 'GET',
+            headers: {
+                // 'Authorization': `Bearer ${localStorage.getItem('token')}` // 依你環境決定是否開啟
+            }
+        });
+        
+        if (!response.ok) throw new Error('後端產生報表失敗');
+
+        // 3. 解析後端回傳的標準檔名 (從 Content-Disposition 撈取)
+        let filename = `attendance-${startDate || new Date().toISOString().split('T')[0]}.xlsx`;
+        const disposition = response.headers.get('Content-Disposition');
+        if (disposition && disposition.includes('filename=')) {
+            const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+            const matches = filenameRegex.exec(disposition);
+            if (matches != null && matches[1]) { 
+                // 去除可能包夾的雙引號
+                filename = matches[1].replace(/['"]/g, '');
+            }
+        }
+
+        // 4. 轉為 Blob 並觸發瀏覽器下載
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
+        
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = `attendance-${startDate||new Date().toISOString().split('T')[0]}.xlsx`;
+        link.download = filename; // 使用後端提供的漂亮檔名
+        
+        // 確保跨瀏覽器相容性的 DOM 操作
+        document.body.appendChild(link);
         link.click();
-        URL.revokeObjectURL(downloadUrl);
-    } catch (error) { alert('匯出失敗: '+error.message); }
+        document.body.removeChild(link);
+        
+        // 延遲釋放記憶體，避免下載被瀏覽器提早中斷
+        setTimeout(() => {
+            URL.revokeObjectURL(downloadUrl);
+        }, 250);
+
+    } catch (error) { 
+        alert('匯出失敗: ' + error.message); 
+    }
 }
 
 // ── Modal helpers ─────────────────────────────
