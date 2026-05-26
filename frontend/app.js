@@ -446,7 +446,8 @@ async function fetchAttendance() {
             let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
-            const response = await fetch(url);
+            const headers = await ensureReportAuth(employeeId);
+            const response = await fetch(url, { headers });
             const data = await response.json();
             if (response.status===403) throw new Error(`${employeeId} 無主管權限`);
             if (!response.ok) throw new Error(data.error||'查詢失敗');
@@ -459,7 +460,8 @@ async function fetchAttendance() {
             let url = `${getReportUrl()}/v1/reports/${endpoint}?as=${employeeId}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate)   url += `&end_date=${endDate}`;
-            const response = await fetch(url);
+            const headers = await ensureReportAuth(employeeId);
+            const response = await fetch(url, { headers });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error||'查詢失敗');
             const reports = Array.isArray(data)?data:[];
