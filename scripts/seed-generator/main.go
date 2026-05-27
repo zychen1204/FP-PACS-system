@@ -197,15 +197,17 @@ func main() {
 		fmt.Sprintf("%v", cfg.DryRun),
 	)
 
-	// 對齊台北時間凌晨 0 點作為起始日
+	// 時間軸契約：seed 涵蓋 [today - Days, yesterday]，全部過去。
+	// 今天的資料留給 access-api 即時 swipe 產生，避免未來時間汙染報表。
 	loc, _ := time.LoadLocation("Asia/Taipei")
 	if loc == nil {
 		loc = time.FixedZone("CST", 8*3600)
 	}
 	now := time.Now().In(loc)
-	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc) // 今天 00:00 (exclusive)
+	startDate := endDate.AddDate(0, 0, -cfg.Days)                             // today - Days
 
-	fmt.Printf("\n📅 模擬區間：%s → %s\n\n",
+	fmt.Printf("\n📅 模擬區間：%s → %s（不含今天，留給即時 swipe）\n\n",
 		startDate.Format("2006-01-02"),
 		startDate.AddDate(0, 0, cfg.Days-1).Format("2006-01-02"),
 	)

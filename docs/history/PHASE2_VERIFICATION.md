@@ -637,6 +637,32 @@ SQL
 # Run Sections 1-15 commands as listed above
 ```
 
+## 18.5 時間軸驗收（追加：seed 不寫未來）
+
+對應 0106 migration + 0099/seed-generator 時間軸契約。任何時候執行以下 SQL，`future_events` 必為 0：
+
+```bash
+docker compose exec -T postgres psql -U pacs_user -d pacs_db -c \
+  "SELECT COUNT(*) AS future_events FROM access_events WHERE event_time > NOW();"
+```
+
+DEV_SEED 也應該全部落在過去（≤ yesterday）：
+
+```bash
+docker compose exec -T postgres psql -U pacs_user -d pacs_db -c \
+  "SELECT MAX(event_time) AS latest_dev_seed,
+          NOW() AS server_now,
+          MAX(event_time) < NOW() AS in_past
+   FROM access_events WHERE reason LIKE '[DEV_SEED]%';"
+```
+
+site_id 字典應該只有 `FAB12A/FAB12B/FAB15/FAB18A/FAB18B`（無 `Site-A/B`、無 `Gate-1/2/3`）：
+
+```bash
+docker compose exec -T postgres psql -U pacs_user -d pacs_db -c \
+  "SELECT DISTINCT site_id FROM access_events ORDER BY 1;"
+```
+
 ## 19. 結語
 
 Phase 2 後端 7 個 stage（migrations / TODO 修補 / 4 個 endpoint / anomaly-detector / mv-refresher + org-sync / DLQ + read replica / docker-compose 整合）**全部完成、本機驗收 14 條全綠**。HW2 §2 的 FR-1~FR-13 與 §3 的 NFR-1, 2, 5, 7, 8 都有對應實作與驗證證據；§5.3 列出的 Phase 2 升級項（微服務拆分、ltree、partition、MV、DLQ、Read Replica、org-sync CronJob）全部就位。

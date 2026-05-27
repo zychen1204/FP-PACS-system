@@ -27,11 +27,8 @@
 ## 快速開始（本地 docker compose）
 
 ```bash
-# 1. 啟服務 + 灌一點員工資料（給 k6 用的 badge pool）
-docker compose down -v && docker compose up -d
-cd scripts/seed-generator && go run . --mode local --days 7
-docker compose exec -T postgres psql -U pacs_user -d pacs_db < seed_history_events.sql
-cd -
+# 1. 一鍵重置 + 灌過去 7 天歷史（seed 不含今天，今天留給 k6 即時打）
+./scripts/demo-reset.sh 7
 
 # 2. 跑 k6 shift burst（主驗收場景）
 cd scripts/k6-load-test
