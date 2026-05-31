@@ -135,11 +135,11 @@ spec:
         averageUtilization: 75
   behavior:
     scaleUp:
-      stabilizationWindowSeconds: 60   # 1 分鐘穩定後才擴
+      stabilizationWindowSeconds: 15   # 快速回應 burst 流量
       policies:
       - type: Pods
         value: 3
-        periodSeconds: 60
+        periodSeconds: 30
     scaleDown:
       stabilizationWindowSeconds: 300  # 5 分鐘穩定後才縮
       policies:

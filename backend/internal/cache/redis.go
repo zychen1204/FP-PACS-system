@@ -31,6 +31,8 @@ func NewRedisCache() (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         fmt.Sprintf("%s:%s", host, port),
 		DB:           0,
+		PoolSize:     50,
+		MinIdleConns: 10,
 		DialTimeout:  5 * time.Second,
 		ReadTimeout:  3 * time.Second,
 		WriteTimeout: 3 * time.Second,
