@@ -77,6 +77,26 @@ open http://localhost/
 > **Phase 3 規模（90k）**：建議跑雲端 `0104_cloud_seed`，seed-generator 在 90k 規模 SQL 檔超過 1GB。
 
 
+## 絕對日期區間（demo 用 1 年歷史）
+
+`--days N` 是「從今天往前推」的相對時間，demo 需要跨多月份的趨勢資料時不夠用。改用 `--start-date` / `--end-date` 可指定絕對區間，**`--end-date` 永遠不能超過今天**，否則 fail-fast。
+
+```bash
+# 灌入 2025-06-01 → 昨天（約 1 年、~87 萬筆事件、SQL ~92 MB）
+cd scripts/seed-generator
+go run . --mode local --start-date 2025-06-01 --clear
+
+# 灌進 DB（~1-2 分鐘）
+docker compose exec -T postgres psql -U pacs_user -d pacs_db < seed_history_events.sql
+docker compose exec postgres psql -U pacs_user -d pacs_db -c \
+  "REFRESH MATERIALIZED VIEW mv_daily_attendance;"
+```
+
+**flag 優先序**：`--start-date` / `--end-date` 任一指定就覆寫 `--days`；同時指定就用絕對區間並重算天數。
+
+> **已知限制 — 農曆假日跨年誤差**：`realistic-simulator.go` 的台灣假日 calendar 用 `MMDD` 為 key、跨年共用，但農曆假日（除夕初一）2025/2026 實際日期不同（2025 春節 1/28–2/2、2026 春節 2/15–2/19）。對日報/月報趨勢影響 < 1%（只影響 5%/95% 出勤機率切換），demo 階段可接受。
+
+
 ## CLI 選項
 
 ```text
@@ -84,6 +104,8 @@ open http://localhost/
 --employees N              員工總數（覆寫 mode preset）
 --managers-l2 N            二級主管數量（覆寫 mode preset）
 --days N                   模擬天數（預設 30，含週末 / 假日 / 出缺席 / 午休邏輯）
+--start-date YYYY-MM-DD    起始日期 (inclusive, Asia/Taipei)，覆寫 --days
+--end-date   YYYY-MM-DD    結束日期 (exclusive, ≤ today)，預設今天
 --clear                    匯入前 TRUNCATE 舊資料
 --api URL                  Access API（Phase 3 報表驗證用，預設 localhost:8080）
 --report URL               Reporting API（同上，預設 localhost:8081）
