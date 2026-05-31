@@ -84,6 +84,34 @@ open http://localhost/
 > **Phase 3 規模（90k）**：建議跑雲端 `0104_cloud_seed`，seed-generator 在 90k 規模 SQL 檔超過 1GB。
 
 
+## 雲端 reset (GKE / Cloud SQL)
+
+`scripts/cloud-reset.sh` 把雲端 Cloud SQL 的 `access_events` 一鍵清空、灌入新的歷史資料；**employees / alerts / MV 定義都不動**。第一參數同樣自動偵測 `YYYY-MM-DD`（絕對日期）或整數（相對天數）。
+
+```bash
+# 切到雲端 cluster
+gcloud container clusters get-credentials pacs-cluster \
+  --location=asia-east1 --project=extreme-water-497313-j8
+
+# 7 天 × local（預設）
+./scripts/cloud-reset.sh
+
+# 絕對日期：2025-06-01 → 昨天（1 年 × ~87 萬筆）
+./scripts/cloud-reset.sh 2025-06-01
+
+# 只看會送什麼 SQL，不真的灌
+./scripts/cloud-reset.sh --dry-run 2025-06-01
+```
+
+**與本地版本的差異**：Cloud SQL 不給 superuser 權限，無法 `SET session_replication_role`，所以腳本改用 `ALTER TABLE ... DISABLE/ENABLE TRIGGER USER` 對 parent 與所有 37 個 partition toggle FR-12 trigger，再跑 TRUNCATE / INSERT / REFRESH MV。
+
+**前置條件**：
+- 已 `kubectl config use-context` 切到 `pacs-cluster`（腳本會檢查，否則 fail-fast）
+- 雲端的 `employees` 表已含 90K 員工（由 `0104_cloud_seed.up.sql` 種好）
+
+**典型耗時**：本地產 SQL 30-60 秒 + cloud upload 30-60 秒 + Cloud SQL 灌入 1-2 分鐘 + REFRESH MV 5-10 秒 ≈ **3-5 分鐘**。
+
+
 ## 絕對日期區間（demo 用 1 年歷史）
 
 `--days N` 是「從今天往前推」的相對時間，demo 需要跨多月份的趨勢資料時不夠用。改用 `--start-date` / `--end-date` 可指定絕對區間，**`--end-date` 永遠不能超過今天**，否則 fail-fast。
