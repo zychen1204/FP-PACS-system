@@ -577,3 +577,195 @@ docker-compose down -v
 | `go test` 在 Windows 被 Application Control 封鎖 | 測試二進位受 OS 政策封鎖，`go build ./...` 正常即代表程式碼無誤 |
 | 趨勢圖只顯示一個點 | 確認查詢的日期範圍 ≥ 2 天，且 `mv_daily_attendance` 已被刷新 |
 | 月/季模式表格空白 | 確認已正確呼叫 `/aggregated` 端點（非日模式呼叫此端點） |
+
+---
+
+## 二十一、k6 上雲壓力測試（NFR-1 驗證，搭配 Grafana 視覺化）
+
+> 測試目標：對 GKE 雲端 access-api 執行 shift-burst 場景，驗證 p99 < 50ms（NFR-1）。
+> k6 從本地執行，metrics 推送至本地 Prometheus，在本地 Grafana 視覺化呈現。
+
+### 前置需求
+
+| 項目 | 確認方式 |
+|------|---------|
+| GKE 叢集運行中 | `kubectl get nodes` |
+| Docker Desktop 啟動中 | `docker ps` |
+| k6 已安裝（WSL） | `k6 version` |
+
+#### 安裝 k6（WSL Ubuntu，第一次才需要）
+
+```bash
+sudo gpg --no-default-keyring \
+  --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+  --keyserver hkp://keyserver.ubuntu.com:80 \
+  --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+
+echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/k6.list
+
+sudo apt-get update && sudo apt-get install k6
+```
+
+---
+
+### 步驟 1：取得雲端 GKE Ingress IP
+
+```bash
+# 先連接 GKE（若 kubectl 出現 connection refused 時執行）
+gcloud container clusters get-credentials pacs-cluster \
+  --region=asia-east1 \
+  --project=extreme-water-497313-j8
+
+# 取得目前 Ingress IP（每次部署後 IP 可能不同，不要硬編碼）
+kubectl get ingress pacs-ingress -n pacs
+```
+
+記下 `ADDRESS` 欄位的 IP，例如 `34.107.166.43`。
+
+---
+
+### 步驟 2：啟動本地 Prometheus + Grafana
+
+```bash
+docker-compose up -d prometheus grafana
+```
+
+確認啟動：
+```bash
+docker-compose ps prometheus grafana
+```
+
+---
+
+### 步驟 3：執行 k6 壓測
+
+> 將 `<GKE_IP>` 替換為步驟 1 取得的 IP。
+
+```bash
+k6 run \
+  --out experimental-prometheus-rw \
+  -e K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+  -e ACCESS_API=http://<GKE_IP> \
+  scripts/k6-load-test/shift_burst.js
+```
+
+測試場景（總時長 3.5 分鐘）：
+
+| 時間段 | 持續時間 | QPS | 說明 |
+|--------|---------|-----|------|
+| 0:00 ~ 0:30 | 30s | 1 → 5 | 常態 baseline |
+| 0:30 ~ 1:00 | 30s | 5 → 100 | Ramp-up 換班尖峰 |
+| 1:00 ~ 3:00 | 2min | 100 | 維持換班尖峰（burst plateau） |
+| 3:00 ~ 3:30 | 30s | 100 → 5 | Ramp-down |
+
+---
+
+### 步驟 4：Grafana 觀察重點
+
+開啟 `http://localhost:3000`，進入 k6 Load Testing Results dashboard，調整時間範圍為 **Last 15 minutes**：
+
+| Panel | 觀察重點 |
+|-------|---------|
+| **Performance Overview**（折線圖） | VUs 與 QPS ramp-up / plateau / ramp-down 曲線 |
+| **HTTP Request Rate** | QPS 從 0 爬升到 ~100 再降回 |
+| **HTTP Latency Stats** | p99 全程應維持在 50ms 以下（NFR-1） |
+| **Requests by URL** | 顯示雲端 IP `/v1/swipe`，p99 數值 |
+| **Checks: status 200 or 403_APB** | Success Rate 應為 100% |
+
+---
+
+### 通過標準（NFR-1）
+
+| 指標 | 門檻 | 預期結果 |
+|------|------|---------|
+| p99 延遲 | < 50ms | ✅ 通過 |
+| Error rate（5xx） | < 5% | ✅ 通過 |
+| Checks success rate | 100% | ✅ 通過 |
+
+---
+
+## 二十二、HPA 自動擴縮驗證
+
+> 測試目標：在 k6 壓測期間觀察 access-api HPA 自動增加 Pod 數量，驗證水平自動擴縮功能。
+> HPA 設定：CPU 65% 觸發，minReplicas=3，maxReplicas=20，scaleUp 穩定窗口 60 秒。
+
+### 步驟 1：暫時調低 HPA 觸發門檻（demo 用）
+
+正常 100 QPS 下 CPU 未必超過 65%，調低至 10% 讓擴縮容易被觀察到：
+
+```bash
+kubectl patch hpa access-api-hpa -n pacs \
+  --type=merge \
+  -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":10}}}]}}'
+```
+
+確認已套用：
+```bash
+kubectl get hpa access-api-hpa -n pacs
+```
+
+---
+
+### 步驟 2：開啟 HPA 監控視窗
+
+另開一個 terminal，每 3 秒刷新顯示 HPA 與 Pod 狀態：
+
+```bash
+watch -n 3 kubectl get hpa,pods -n pacs
+```
+
+---
+
+### 步驟 3：執行 k6 壓測觸發擴縮
+
+```bash
+k6 run \
+  --out experimental-prometheus-rw \
+  -e K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write \
+  -e ACCESS_API=http://<GKE_IP> \
+  scripts/k6-load-test/shift_burst.js
+```
+
+---
+
+### 步驟 4：觀察擴縮行為
+
+k6 進入 burst 階段（約 1 分鐘後），應觀察到 REPLICAS 從 3 增加：
+
+```
+NAME             REFERENCE               TARGETS       MINPODS   MAXPODS   REPLICAS
+access-api-hpa   Deployment/access-api   cpu: 0%/10%   3         20        3    ← 初始
+access-api-hpa   Deployment/access-api   cpu: 13%/10%  3         20        3    ← CPU 超過門檻
+access-api-hpa   Deployment/access-api   cpu: 14%/10%  3         20        4    ← 擴縮觸發！
+access-api-hpa   Deployment/access-api   cpu: 0%/10%   3         20        4    ← 負載結束
+access-api-hpa   Deployment/access-api   cpu: 0%/10%   3         20        3    ← 自動縮回
+```
+
+> 注意：HPA 有 60 秒 stabilizationWindowSeconds，觸發後約 1 分鐘才會開始擴縮。REPLICAS 增加即代表驗證成功。
+
+---
+
+### 步驟 5：還原 HPA 門檻（測試完必做）
+
+```bash
+kubectl patch hpa access-api-hpa -n pacs \
+  --type=merge \
+  -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":65}}}]}}'
+```
+
+確認還原：
+```bash
+kubectl get hpa access-api-hpa -n pacs
+# TARGETS 欄位應回到 xx%/65%
+```
+
+---
+
+### Demo 畫面配置建議
+
+| 視窗 | 顯示內容 |
+|------|---------|
+| 瀏覽器 | Grafana — HTTP Request Rate + HTTP Latency Stats |
+| Terminal 1 | `watch -n 3 kubectl get hpa,pods -n pacs`（HPA 擴縮） |
+| Terminal 2 | k6 執行輸出（即時 threshold 狀態） |
