@@ -9,9 +9,11 @@
 #   * 驗證沒有未來時間事件
 #
 # Usage:
-#   ./scripts/demo-reset.sh           # default 7 days
-#   ./scripts/demo-reset.sh 30        # 30 days
-#   ./scripts/demo-reset.sh 7 fab     # 30K employees (Phase 2 scale)
+#   ./scripts/demo-reset.sh                  # default 7 days
+#   ./scripts/demo-reset.sh 30               # 30 days
+#   ./scripts/demo-reset.sh 7 fab            # 30K employees (Phase 2 scale)
+#   ./scripts/demo-reset.sh 2025-06-01       # absolute start date → yesterday
+#   ./scripts/demo-reset.sh 2025-06-01 fab   # absolute date × fab scale
 #
 # 退出碼：
 #   0  成功
@@ -21,16 +23,29 @@
 # ============================================================
 set -euo pipefail
 
-DAYS="${1:-7}"
+ARG1="${1:-7}"
 MODE="${2:-local}"
+
+# Detect absolute-date mode (YYYY-MM-DD) vs relative-days mode (integer).
+if [[ "$ARG1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    SEED_MODE="absolute"
+    START_DATE="$ARG1"
+    DAYS=""
+    SEED_LABEL="$START_DATE → yesterday (absolute)"
+else
+    SEED_MODE="days"
+    DAYS="$ARG1"
+    START_DATE=""
+    SEED_LABEL="$DAYS days (relative)"
+fi
 
 # 對齊 repo root（不論從哪呼叫都能 work）
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> PACS Demo Reset"
-echo "    Mode:  $MODE"
-echo "    Days:  $DAYS (today excluded — reserved for live swipe demo)"
+echo "    Scale: $MODE"
+echo "    Range: $SEED_LABEL (today excluded — reserved for live swipe demo)"
 echo "    Root:  $ROOT"
 echo
 
@@ -84,11 +99,19 @@ for i in {1..60}; do
 done
 
 # ── Phase 4: seed-generator + 灌歷史 ──────────────────────
-echo "[4/5] seed-generator --mode $MODE --days $DAYS ..."
-(
-    cd scripts/seed-generator
-    go run . --mode "$MODE" --days "$DAYS"
-)
+if [[ "$SEED_MODE" == "absolute" ]]; then
+    echo "[4/5] seed-generator --mode $MODE --start-date $START_DATE --clear ..."
+    (
+        cd scripts/seed-generator
+        go run . --mode "$MODE" --start-date "$START_DATE" --clear
+    )
+else
+    echo "[4/5] seed-generator --mode $MODE --days $DAYS ..."
+    (
+        cd scripts/seed-generator
+        go run . --mode "$MODE" --days "$DAYS"
+    )
+fi
 
 echo "      psql < seed_history_events.sql ..."
 docker compose exec -T postgres psql -U pacs_user -d pacs_db \
@@ -122,8 +145,8 @@ echo
 echo "✅ Demo data ready"
 echo "    access_events total : $TOTAL"
 echo "      └─ [DEV_SEED]     : $DEV   (0099 demo rows)"
-echo "      └─ [STRESS_TEST]  : $STRESS (seed-generator $DAYS days)"
+echo "      └─ [STRESS_TEST]  : $STRESS (seed-generator $SEED_LABEL)"
 echo "      └─ future events  : $FUTURE_COUNT (must be 0)"
 echo
 echo "    Open dashboard:  http://localhost/"
-echo "    Trend：過去 $DAYS 天有資料，今天空白；用前端模擬器送 swipe 即時展示 CQRS write path"
+echo "    Trend：$SEED_LABEL 有資料，今天空白；用前端模擬器送 swipe 即時展示 CQRS write path"

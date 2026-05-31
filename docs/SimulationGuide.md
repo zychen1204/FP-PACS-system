@@ -40,9 +40,16 @@
 
 # 30 天 + Phase 2 規模（30,000 人）
 ./scripts/demo-reset.sh 30 fab
+
+# 絕對日期：2025-06-01 → 昨天（~1 年歷史，自動帶 --clear）
+./scripts/demo-reset.sh 2025-06-01
+
+# 絕對日期 + Phase 2 規模
+./scripts/demo-reset.sh 2025-06-01 fab
 ```
 
 `scripts/demo-reset.sh` 會 down -v → 起服務 → 跑 migration（0001~0106）→ 跑 seed-generator → 灌 SQL → REFRESH MV → 驗證沒有未來時間事件。
+**參數 1 自動偵測格式**：`YYYY-MM-DD` 切絕對日期模式（自動帶 `--clear`）、整數切相對天數模式。
 
 **手動步驟（debug 用）**
 
