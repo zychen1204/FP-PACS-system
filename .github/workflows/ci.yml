@@ -69,7 +69,9 @@ jobs:
           cache-dependency-path: backend/go.sum
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.59
+          # backend/.golangci.yml uses v2 config syntax (`version: "2"`,
+          # `linters.default`, `linters.settings`), which requires the v2 binary.
+          version: v2.3.0
           working-directory: backend
           args: --timeout=5m
 
