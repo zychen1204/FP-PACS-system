@@ -66,12 +66,14 @@ make gke-https-smoke DOMAIN_NAME=34-107-166-43.sslip.io
 | **快取 / MQ** | Redis 7 (Cache, Streams, DLQ) |
 | **基建** | Docker, Docker Compose, Grafana/Prometheus |
 
+## 🧪 測試與模擬
 
-### 🌟 開發重點
-- **待辦清單**: 👉 [待辦事項](docs/TodoList.md)
-- **資料模擬**: 👉 [模擬指南](docs/SimulationGuide.md)
 
-## 🧪 測試與驗證
+- **資料模擬**: 
+👉 **[模擬指南](docs/SimulationGuide.md)**
 
-本系統提供豐富的單元與端到端 (E2E) 測試機制。
+- **壓力測試**: 
+👉 **[k6壓力測試](docs/LoadTestGuide.md)**
+
+- **端到端 (E2E) 測試**。
 👉 **[測試詳細](docs/TestingGuide.md)**
