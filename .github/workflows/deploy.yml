@@ -71,7 +71,7 @@ jobs:
           AR_LOCATION: ${{ vars.AR_LOCATION }}
           AR_REPO: ${{ vars.AR_REPO }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sha || github.sha }}
           fetch-depth: 2  # paths-filter needs a base to diff against
@@ -170,7 +170,7 @@ jobs:
       matrix:
         service: ${{ fromJson(needs.preflight.outputs.backend_services) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: google-github-actions/auth@v3
@@ -201,7 +201,7 @@ jobs:
     if: needs.preflight.outputs.build_frontend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
       - uses: google-github-actions/auth@v3
@@ -241,7 +241,7 @@ jobs:
       AR_PREFIX: ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}
       NAMESPACE: ${{ vars.GKE_NAMESPACE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
 
