@@ -28,7 +28,7 @@ spec:
       terminationGracePeriodSeconds: 60   # 讓 Stream consumer 有時間 commit
       containers:
       - name: event-processor
-        image: gcr.io/PROJECT_ID/pacs-event-processor:latest
+        image: asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/event-processor:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8082
@@ -166,7 +166,7 @@ spec:
       serviceAccountName: pacs-sa
       containers:
       - name: anomaly-detector
-        image: gcr.io/PROJECT_ID/pacs-anomaly-detector:latest
+        image: asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/anomaly-detector:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8083
@@ -280,7 +280,7 @@ spec:
       serviceAccountName: pacs-sa
       containers:
       - name: mv-refresher
-        image: gcr.io/PROJECT_ID/pacs-mv-refresher:latest
+        image: asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/mv-refresher:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8084

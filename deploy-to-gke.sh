@@ -78,11 +78,30 @@ gcloud services enable \
     redis.googleapis.com \
     iam.googleapis.com \
     cloudbuild.googleapis.com \
-    containerregistry.googleapis.com \
+    artifactregistry.googleapis.com \
     compute.googleapis.com \
     serviceusage.googleapis.com \
     --project="$PROJECT_ID"
 echo "   ✅ APIs 已啟用或原本已啟用"
+
+# ── Artifact Registry repository (取代已 deprecated 的 GCR) ──
+AR_LOCATION=${AR_LOCATION:-asia-east1}
+AR_REPO=${AR_REPO:-pacs}
+AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+AR_REGISTRY="${AR_HOST}/${PROJECT_ID}/${AR_REPO}"
+echo ""
+echo "📦 [0.1/7] 確保 Artifact Registry repository '${AR_REPO}' (${AR_LOCATION}) 存在..."
+if ! gcloud artifacts repositories describe "$AR_REPO" --location="$AR_LOCATION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud artifacts repositories create "$AR_REPO" \
+        --repository-format=docker \
+        --location="$AR_LOCATION" \
+        --description="PACS container images (CI/CD target)" \
+        --project="$PROJECT_ID"
+    echo "   ✅ AR repository 建立完成"
+else
+    echo "   ✅ AR repository 已存在"
+fi
+echo "   Registry: ${AR_REGISTRY}"
 
 if [ "$ENABLE_HTTPS" = "1" ]; then
     echo ""
@@ -211,26 +230,25 @@ if [ "$BUILD_IMAGES" = "1" ]; then
         exit 1
     fi
 
-    export DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/pacs-docker-config}
-    mkdir -p "$DOCKER_CONFIG"
-    if ! gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://gcr.io >/dev/null; then
-        echo "❌ Docker 登入 gcr.io 失敗。請確認 gcloud 已登入，且帳號有推送 Container Registry 的權限。"
+    # 用 gcloud credential helper（避免在 macOS 觸發 keychain，亦避免明文 token 落盤）
+    if ! gcloud auth configure-docker "${AR_HOST}" --quiet >/dev/null 2>&1; then
+        echo "❌ gcloud auth configure-docker ${AR_HOST} 失敗。請確認 gcloud 已登入並有 Artifact Registry 推送權限。"
         exit 1
     fi
 
     BACKEND_SERVICES=("access-api" "event-processor" "reporting-api" "anomaly-detector" "mv-refresher" "org-sync")
     for svc in "${BACKEND_SERVICES[@]}"; do
-        echo "   building pacs-$svc ..."
+        echo "   building ${svc} ..."
         docker build \
             --build-arg SERVICE="$svc" \
-            -t "gcr.io/$PROJECT_ID/pacs-$svc:latest" \
+            -t "${AR_REGISTRY}/${svc}:latest" \
             ./backend
-        docker push "gcr.io/$PROJECT_ID/pacs-$svc:latest"
+        docker push "${AR_REGISTRY}/${svc}:latest"
     done
 
-    echo "   building pacs-frontend ..."
-    docker build -t "gcr.io/$PROJECT_ID/pacs-frontend:latest" ./frontend
-    docker push "gcr.io/$PROJECT_ID/pacs-frontend:latest"
+    echo "   building frontend ..."
+    docker build -t "${AR_REGISTRY}/frontend:latest" ./frontend
+    docker push "${AR_REGISTRY}/frontend:latest"
     echo "   ✅ 所有 Images 推送完成"
 else
     echo "   ⏭️  BUILD_IMAGES=0，略過 Docker build/push"
@@ -296,9 +314,9 @@ echo "   ✅ Secrets & ConfigMap 建立完成"
 echo ""
 echo "🚀 [7/7] 部署 Kubernetes Resources..."
 
-# 輔助函數：替換 PROJECT_ID 佔位符後套用
+# 輔助函數：套用 manifest（image 路徑已固化為 Artifact Registry，無需替換）
 apply_yaml() {
-    sed "s|gcr\.io/PROJECT_ID|gcr.io/$PROJECT_ID|g" "$1" | kubectl apply -f -
+    kubectl apply -f "$1"
 }
 
 apply_https_ingress() {

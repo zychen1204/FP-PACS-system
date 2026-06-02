@@ -6,6 +6,8 @@ REGION ?= asia-east1
 CLUSTER_NAME ?= pacs-cluster
 DB_INSTANCE_NAME ?= pacs-pg16
 REDIS_NAME ?= pacs-redis
+AR_LOCATION ?= asia-east1
+AR_REPO ?= pacs
 DB_EDITION ?= ENTERPRISE
 DB_TIER ?= db-custom-2-7680
 GKE_NUM_NODES ?= 1
@@ -234,6 +236,8 @@ gke-deploy: require-project-id gke-preflight
 	STATIC_IP_NAME="$(STATIC_IP_NAME)" \
 	WAIT_FOR_CERT="$(WAIT_FOR_CERT)" \
 	CERT_WAIT_TIMEOUT="$(CERT_WAIT_TIMEOUT)" \
+	AR_LOCATION="$(AR_LOCATION)" \
+	AR_REPO="$(AR_REPO)" \
 	./deploy-to-gke.sh "$(PROJECT_ID)" "$(REGION)" "$(CLUSTER_NAME)" "$(DB_INSTANCE_NAME)" "$(REDIS_NAME)"
 
 gke-deploy-no-build:
@@ -242,10 +246,9 @@ gke-deploy-no-build:
 gke-deploy-frontend: require-project-id
 	@command -v docker >/dev/null 2>&1 || { printf "Missing docker. Install Docker Desktop and enable WSL integration.\n"; exit 1; }
 	@docker info >/dev/null 2>&1 || { printf "Docker is not available in this shell.\n"; exit 1; }
-	@mkdir -p "$${DOCKER_CONFIG:-/tmp/pacs-docker-config}"
-	@gcloud auth print-access-token | DOCKER_CONFIG="$${DOCKER_CONFIG:-/tmp/pacs-docker-config}" docker login -u oauth2accesstoken --password-stdin https://gcr.io >/dev/null
-	DOCKER_CONFIG="$${DOCKER_CONFIG:-/tmp/pacs-docker-config}" docker build -t "gcr.io/$(PROJECT_ID)/pacs-frontend:latest" ./frontend
-	DOCKER_CONFIG="$${DOCKER_CONFIG:-/tmp/pacs-docker-config}" docker push "gcr.io/$(PROJECT_ID)/pacs-frontend:latest"
+	@gcloud auth configure-docker "$(AR_LOCATION)-docker.pkg.dev" --quiet >/dev/null
+	docker build -t "$(AR_LOCATION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/frontend:latest" ./frontend
+	docker push "$(AR_LOCATION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/frontend:latest"
 	kubectl rollout restart deployment/frontend -n "$(NAMESPACE)"
 	kubectl rollout status deployment/frontend -n "$(NAMESPACE)" --timeout=180s
 
@@ -393,15 +396,15 @@ gke-full-cleanup: require-project-id
 	gcloud redis instances delete "$(REDIS_NAME)" --project="$(PROJECT_ID)" --region="$(REGION)" --quiet
 
 gke-images-list: require-project-id
-	gcloud container images list --repository="gcr.io/$(PROJECT_ID)"
+	gcloud artifacts docker images list "$(AR_LOCATION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)" --include-tags --limit=50
 
 gke-images-delete: require-project-id
 	@if [ "$(CONFIRM)" != "delete-images" ]; then \
-		printf "This deletes demo container images from gcr.io/%s. Run: make gke-images-delete CONFIRM=delete-images\n" "$(PROJECT_ID)"; \
+		printf "This deletes demo container images from %s-docker.pkg.dev/%s/%s. Run: make gke-images-delete CONFIRM=delete-images\n" "$(AR_LOCATION)" "$(PROJECT_ID)" "$(AR_REPO)"; \
 		exit 1; \
 	fi
 	@for service in $(IMAGE_SERVICES); do \
-		gcloud container images delete "gcr.io/$(PROJECT_ID)/pacs-$$service:latest" --quiet; \
+		gcloud artifacts docker images delete "$(AR_LOCATION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$$service" --delete-tags --quiet || true; \
 	done
 
 gke-seed-cloud:

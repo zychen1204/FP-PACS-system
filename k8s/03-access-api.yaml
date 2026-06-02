@@ -30,7 +30,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: access-api
-        image: gcr.io/extreme-water-497313-j8/pacs-access-api:latest
+        image: asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/access-api:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
