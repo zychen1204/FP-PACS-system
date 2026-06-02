@@ -35,7 +35,7 @@ CONFIRM ?=
 
 .PHONY: help \
 	compose-up compose-down compose-logs compose-ps \
-	backend-test backend-vet backend-lint \
+	backend-test backend-test-race backend-vet backend-lint \
 	frontend-test smoke smoke-local smoke-gke \
 	local-k8s local-k8s-no-build k8s-status k8s-pods \
 	gke-config gke-preflight gke-deploy gke-deploy-no-build gke-deploy-frontend gke-status gke-ingress \
@@ -55,6 +55,7 @@ help:
 	@printf "  make compose-ps          Show compose services\n\n"
 	@printf "Tests:\n"
 	@printf "  make backend-test        Run Go tests\n"
+	@printf "  make backend-test-race   Run Go tests with race detector (CI)\n"
 	@printf "  make backend-vet         Run go vet\n"
 	@printf "  make backend-lint        Run golangci-lint\n"
 	@printf "  make frontend-test       Print browser test runner path\n\n"
@@ -117,6 +118,9 @@ compose-ps:
 
 backend-test:
 	$(MAKE) -C backend test
+
+backend-test-race:
+	$(MAKE) -C backend test-race
 
 backend-vet:
 	$(MAKE) -C backend vet
