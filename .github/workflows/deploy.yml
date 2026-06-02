@@ -153,9 +153,11 @@ jobs:
             any_build=true
           fi
 
-          echo "backend_services=$backend_json" >> "$GITHUB_OUTPUT"
-          echo "build_frontend=$build_frontend" >> "$GITHUB_OUTPUT"
-          echo "any_build=$any_build" >> "$GITHUB_OUTPUT"
+          {
+            echo "backend_services=$backend_json"
+            echo "build_frontend=$build_frontend"
+            echo "any_build=$any_build"
+          } >> "$GITHUB_OUTPUT"
           echo "Plan: backend=$backend_services frontend=$build_frontend"
 
   build-backend:
