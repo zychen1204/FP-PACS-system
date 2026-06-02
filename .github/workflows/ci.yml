@@ -92,7 +92,6 @@ jobs:
           - { service: reporting-api,     context: ./backend,  build_arg: 'SERVICE=reporting-api' }
           - { service: anomaly-detector,  context: ./backend,  build_arg: 'SERVICE=anomaly-detector' }
           - { service: mv-refresher,      context: ./backend,  build_arg: 'SERVICE=mv-refresher' }
-          - { service: org-sync,          context: ./backend,  build_arg: 'SERVICE=org-sync' }
           - { service: frontend,          context: ./frontend, build_arg: '' }
     steps:
       - uses: actions/checkout@v4
