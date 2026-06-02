@@ -25,8 +25,8 @@ Recommended presentation order:
 
 3. Deployment process
    - Build Docker images.
-   - Push images to `gcr.io/extreme-water-497313-j8`.
-   - Create or reuse GKE, Cloud SQL, and Redis.
+   - Push images to Artifact Registry (`asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/`). The previous registry `gcr.io/...` was deprecated by Google and migrated away in PR #38.
+   - Create or reuse GKE, Cloud SQL, Redis, and the Artifact Registry repository.
    - Create Kubernetes ConfigMaps, Secrets, ServiceAccount, Deployments, Services, HPA, Ingress, and migration Job.
 
 4. Problems encountered and fixes
@@ -42,6 +42,13 @@ Recommended presentation order:
    - Database migrations completed with `version=102`, `dirty=false`.
    - 90,000 employee cloud seed completed.
    - k6 shift-burst load test completed successfully.
+
+6. Automated deployment (added 2026-06)
+   - `deploy-to-gke.sh` and `make gke-deploy` remain the supported "from-scratch" path for initial cluster bootstrap and disaster recovery.
+   - Day-to-day deployment is now driven by GitHub Actions: `.github/workflows/ci.yml` gates every PR (Go test/vet/lint, Dockerfile build, kubeconform), and `.github/workflows/deploy.yml` builds + pushes images + rolls out on every `main` push (with `workflow_dispatch` for ad-hoc SHA/service deploys). See [docs/CICDGuide.md](CICDGuide.md) for the WIF setup and runbook.
+   - Image tagging changed from `:latest` (mutable, hard to roll back) to git SHA short tags; `kubectl set image` triggers a real rolling update with `kubectl rollout undo` rollback on failure.
+   - Authentication uses Workload Identity Federation (`pacs-gha-deployer@...` impersonated by the GitHub repo principal) — no JSON keys are issued.
+   - Manual seed (`scripts/cloud_migrations/`) and large-scale seed (`scripts/migrations/0103_*`) remain out-of-band by design.
 
 ## 2. Cloud Architecture
 

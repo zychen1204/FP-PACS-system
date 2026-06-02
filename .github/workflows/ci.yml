@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+# Cancel in-flight runs for the same ref on new pushes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      k8s: ${{ steps.filter.outputs.k8s }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.yml'
+            frontend:
+              - 'frontend/**'
+            k8s:
+              - 'k8s/**'
+
+  backend-test:
+    name: Backend test (go test + go vet)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: go test
+        working-directory: backend
+        run: go test -race -timeout=180s ./...
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+
+  backend-lint:
+    name: Backend lint (golangci-lint)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    # backend/.golangci.yml still mixes v1 syntax (`issues.exclude-rules`,
+    # `issues.exclude`) with v2 syntax (`version: "2"`, `linters.default`).
+    # Until that file is fully migrated to v2 the config-verify step trips.
+    # Treat lint output as advisory for now so the PR-gate stays useful.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.3.0
+          working-directory: backend
+          args: --timeout=5m
+
+  docker-build:
+    name: Docker build (dry-run, no push)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { service: access-api,        context: ./backend,  build_arg: 'SERVICE=access-api' }
+          - { service: event-processor,   context: ./backend,  build_arg: 'SERVICE=event-processor' }
+          - { service: reporting-api,     context: ./backend,  build_arg: 'SERVICE=reporting-api' }
+          - { service: anomaly-detector,  context: ./backend,  build_arg: 'SERVICE=anomaly-detector' }
+          - { service: mv-refresher,      context: ./backend,  build_arg: 'SERVICE=mv-refresher' }
+          - { service: org-sync,          context: ./backend,  build_arg: 'SERVICE=org-sync' }
+          - { service: frontend,          context: ./frontend, build_arg: '' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.target.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.target.context }}
+          push: false
+          load: false
+          build-args: ${{ matrix.target.build_arg }}
+          cache-from: type=gha,scope=${{ matrix.target.service }}
+          cache-to: type=gha,scope=${{ matrix.target.service }},mode=max
+
+  k8s-validate:
+    name: K8s manifest validate (kubeconform)
+    needs: changes
+    if: needs.changes.outputs.k8s == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+      - name: Validate manifests
+        # `-strict` rejects unknown fields. `-ignore-missing-schemas` allows
+        # GKE-specific CRDs (ManagedCertificate, FrontendConfig) to pass without
+        # custom schemas; we still validate the core API objects.
+        run: |
+          kubeconform -strict -ignore-missing-schemas \
+            -kubernetes-version 1.30.0 \
+            -schema-location default \
+            k8s/*.yaml
+
+  ci-summary:
+    name: CI summary
+    if: always()
+    needs: [changes, backend-test, backend-lint, docker-build, k8s-validate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## CI summary"
+            echo ""
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| changes      | ${{ needs.changes.result }} |"
+            echo "| backend-test | ${{ needs.backend-test.result }} |"
+            echo "| backend-lint | ${{ needs.backend-lint.result }} (advisory) |"
+            echo "| docker-build | ${{ needs.docker-build.result }} |"
+            echo "| k8s-validate | ${{ needs.k8s-validate.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # backend-lint is advisory until .golangci.yml is fully migrated to v2;
+          # do not block on it. Other jobs are mandatory.
+          if [[ "${{ needs.backend-test.result }}" == "failure" || \
+                "${{ needs.docker-build.result }}" == "failure" || \
+                "${{ needs.k8s-validate.result }}" == "failure" ]]; then
+            exit 1
+          fi

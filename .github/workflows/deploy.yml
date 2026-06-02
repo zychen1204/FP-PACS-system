@@ -1,0 +1,381 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'k8s/**'
+      - 'scripts/migrations/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to deploy (default: HEAD of main)'
+        required: false
+        type: string
+      services:
+        description: 'Comma-separated services to build/deploy (default: auto-detect). Allowed: access-api, event-processor, reporting-api, anomaly-detector, mv-refresher, org-sync, frontend, all'
+        required: false
+        type: string
+        default: ''
+      skip_migrations:
+        description: 'Skip the database migration Job'
+        required: false
+        type: boolean
+        default: false
+
+# Only one deploy in flight at a time. Don't cancel in-progress — a half-done
+# rollout is worse than queueing.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # required for google-github-actions/auth WIF
+  packages: read
+
+env:
+  PACS_BACKEND_SERVICES: 'access-api event-processor reporting-api anomaly-detector mv-refresher org-sync'
+
+jobs:
+  preflight:
+    name: Preflight (verify variables + resolve SHA)
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      sha_short: ${{ steps.resolve.outputs.sha_short }}
+      backend_services: ${{ steps.plan.outputs.backend_services }}
+      build_frontend: ${{ steps.plan.outputs.build_frontend }}
+      any_build: ${{ steps.plan.outputs.any_build }}
+    steps:
+      - name: Verify required variables are set
+        run: |
+          missing=0
+          for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOYER_SA GKE_CLUSTER GKE_REGION GKE_NAMESPACE AR_LOCATION AR_REPO; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Repo variable '$v' is not set. See docs/CICDGuide.md initial-setup checklist."
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA }}
+          GKE_CLUSTER: ${{ vars.GKE_CLUSTER }}
+          GKE_REGION: ${{ vars.GKE_REGION }}
+          GKE_NAMESPACE: ${{ vars.GKE_NAMESPACE }}
+          AR_LOCATION: ${{ vars.AR_LOCATION }}
+          AR_REPO: ${{ vars.AR_REPO }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 2  # paths-filter needs a base to diff against
+
+      - id: resolve
+        name: Resolve SHA
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+      - id: plan
+        name: Plan which services to build
+        run: |
+          ALL_BACKEND="${{ env.PACS_BACKEND_SERVICES }}"
+          manual="${{ inputs.services }}"
+
+          if [ -n "$manual" ]; then
+            # Manual override via workflow_dispatch.
+            if [ "$manual" = "all" ]; then
+              backend_services="$ALL_BACKEND"
+              build_frontend=true
+            else
+              IFS=',' read -ra parts <<< "$manual"
+              backend_services=""
+              build_frontend=false
+              for p in "${parts[@]}"; do
+                svc="${p// /}"
+                case " $ALL_BACKEND " in
+                  *" $svc "*) backend_services="$backend_services $svc" ;;
+                  *)
+                    if [ "$svc" = "frontend" ]; then
+                      build_frontend=true
+                    else
+                      echo "::error::Unknown service '$svc'. Allowed: $ALL_BACKEND, frontend, all"
+                      exit 1
+                    fi
+                    ;;
+                esac
+              done
+              backend_services="$(echo "$backend_services" | xargs)"
+            fi
+          else
+            # Auto-detect via paths-filter (push event only).
+            if [ "${{ steps.filter.outputs.backend }}" = "true" ]; then
+              backend_services="$ALL_BACKEND"
+            else
+              backend_services=""
+            fi
+            build_frontend="${{ steps.filter.outputs.frontend }}"
+            [ -z "$build_frontend" ] && build_frontend=false
+          fi
+
+          # Emit a JSON array so the build job matrix can include it directly.
+          if [ -z "$backend_services" ]; then
+            backend_json='[]'
+          else
+            backend_json='['
+            first=true
+            for s in $backend_services; do
+              if $first; then first=false; else backend_json="$backend_json,"; fi
+              backend_json="$backend_json\"$s\""
+            done
+            backend_json="$backend_json]"
+          fi
+
+          any_build=false
+          if [ "$build_frontend" = "true" ] || [ -n "$backend_services" ]; then
+            any_build=true
+          fi
+
+          {
+            echo "backend_services=$backend_json"
+            echo "build_frontend=$build_frontend"
+            echo "any_build=$any_build"
+          } >> "$GITHUB_OUTPUT"
+          echo "Plan: backend=$backend_services frontend=$build_frontend"
+
+  build-backend:
+    name: Build & push ${{ matrix.service }}
+    needs: preflight
+    if: needs.preflight.outputs.backend_services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.preflight.outputs.backend_services) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.AR_LOCATION }}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@v3
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          build-args: SERVICE=${{ matrix.service }}
+          tags: |
+            ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}/${{ matrix.service }}:${{ needs.preflight.outputs.sha_short }}
+            ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}/${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          provenance: false
+
+  build-frontend:
+    name: Build & push frontend
+    needs: preflight
+    if: needs.preflight.outputs.build_frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.AR_LOCATION }}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}/frontend:${{ needs.preflight.outputs.sha_short }}
+            ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}/frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+          provenance: false
+
+  deploy:
+    name: Deploy to GKE
+    needs: [preflight, build-backend, build-frontend]
+    if: |
+      always() &&
+      needs.preflight.result == 'success' &&
+      needs.preflight.outputs.any_build == 'true' &&
+      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
+    runs-on: ubuntu-latest
+    env:
+      SHA_SHORT: ${{ needs.preflight.outputs.sha_short }}
+      BACKEND_SERVICES_JSON: ${{ needs.preflight.outputs.backend_services }}
+      BUILD_FRONTEND: ${{ needs.preflight.outputs.build_frontend }}
+      AR_PREFIX: ${{ vars.AR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}
+      NAMESPACE: ${{ vars.GKE_NAMESPACE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ vars.GKE_CLUSTER }}
+          location: ${{ vars.GKE_REGION }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Run database migrations
+        if: inputs.skip_migrations != true
+        run: |
+          # Jobs are immutable, so we must delete + re-create.
+          kubectl delete job pacs-migrations -n "$NAMESPACE" --ignore-not-found
+          kubectl apply -f k8s/06-migrations.yaml
+          kubectl wait --for=condition=complete job/pacs-migrations \
+            -n "$NAMESPACE" --timeout=300s
+
+      - name: Set image (backend services)
+        if: env.BACKEND_SERVICES_JSON != '[]'
+        run: |
+          for svc in $(echo "$BACKEND_SERVICES_JSON" | jq -r '.[]'); do
+            echo "::group::set image $svc=$AR_PREFIX/$svc:$SHA_SHORT"
+            kubectl set image deployment/"$svc" \
+              "$svc=$AR_PREFIX/$svc:$SHA_SHORT" \
+              -n "$NAMESPACE"
+            echo "::endgroup::"
+          done
+
+      - name: Set image (frontend)
+        if: env.BUILD_FRONTEND == 'true'
+        run: |
+          echo "::group::set image frontend=$AR_PREFIX/frontend:$SHA_SHORT"
+          kubectl set image deployment/frontend \
+            "frontend=$AR_PREFIX/frontend:$SHA_SHORT" \
+            -n "$NAMESPACE"
+          echo "::endgroup::"
+
+      - name: Wait for rollouts
+        id: rollout
+        run: |
+          set +e
+          rollback_targets=()
+
+          wait_one() {
+            local svc=$1
+            echo "::group::rollout status $svc"
+            if ! kubectl rollout status deployment/"$svc" -n "$NAMESPACE" --timeout=300s; then
+              echo "::error::rollout failed for $svc"
+              echo "::endgroup::"
+              return 1
+            fi
+            echo "::endgroup::"
+            return 0
+          }
+
+          ok=true
+          if [ "$BACKEND_SERVICES_JSON" != '[]' ]; then
+            for svc in $(echo "$BACKEND_SERVICES_JSON" | jq -r '.[]'); do
+              if ! wait_one "$svc"; then
+                rollback_targets+=("$svc")
+                ok=false
+              fi
+            done
+          fi
+          if [ "$BUILD_FRONTEND" = "true" ]; then
+            if ! wait_one "frontend"; then
+              rollback_targets+=("frontend")
+              ok=false
+            fi
+          fi
+
+          if ! $ok; then
+            printf '%s\n' "${rollback_targets[@]}" > /tmp/rollback-targets.txt
+            exit 1
+          fi
+
+      - name: Rollback failing deployments
+        if: failure() && steps.rollout.outcome == 'failure'
+        run: |
+          while IFS= read -r svc; do
+            echo "::warning::rolling back deployment/$svc"
+            kubectl rollout undo deployment/"$svc" -n "$NAMESPACE" || true
+            kubectl rollout status deployment/"$svc" -n "$NAMESPACE" --timeout=180s || true
+            echo "::group::describe deployment/$svc"
+            kubectl describe deployment/"$svc" -n "$NAMESPACE" | tail -80 || true
+            echo "::endgroup::"
+            echo "::group::recent pod logs"
+            kubectl logs -n "$NAMESPACE" -l app="$svc" --tail=120 --all-containers=true || true
+            echo "::endgroup::"
+          done < /tmp/rollback-targets.txt
+
+      - name: Smoke test
+        run: |
+          base="${SMOKE_BASE_URL:-https://34-107-166-43.sslip.io}"
+          echo "Smoke test against $base"
+          curl -fsS "$base/" >/dev/null
+          curl -fsS "$base/api/healthz" >/dev/null
+          curl -fsS "$base/api/report-healthz" >/dev/null
+          curl -fsS -H 'Content-Type: application/json' \
+            -d '{"badge_id":"B-000001"}' \
+            "$base/v1/dev/login" >/dev/null
+          badge="B-SMOKE-$(date +%s)"
+          status=$(curl -sS -o /tmp/swipe.json -w "%{http_code}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"badge_id\":\"$badge\",\"site_id\":\"SMOKE\",\"gate_id\":\"Gate-1A\",\"direction\":\"IN\"}" \
+            "$base/v1/swipe")
+          if [ "$status" != "200" ] && [ "$status" != "403" ]; then
+            echo "::error::Swipe POST failed with HTTP $status"
+            cat /tmp/swipe.json
+            exit 1
+          fi
+          echo "Smoke test OK"
+        env:
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy summary"
+            echo ""
+            echo "- SHA: \`$SHA_SHORT\`"
+            echo "- Backend services: \`$BACKEND_SERVICES_JSON\`"
+            echo "- Frontend: \`$BUILD_FRONTEND\`"
+            echo "- Migrations: \`${{ inputs.skip_migrations && 'skipped' || 'run' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

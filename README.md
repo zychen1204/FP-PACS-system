@@ -1,6 +1,8 @@
 # 🏢 PACS — 分散式實體門禁控制系統
 > **Cloud-Native Physical Access Control System**
 
+[![CI](https://github.com/zychen1204/FP-PACS-system/actions/workflows/ci.yml/badge.svg)](https://github.com/zychen1204/FP-PACS-system/actions/workflows/ci.yml)
+[![Deploy](https://github.com/zychen1204/FP-PACS-system/actions/workflows/deploy.yml/badge.svg)](https://github.com/zychen1204/FP-PACS-system/actions/workflows/deploy.yml)
 [![Status](https://img.shields.io/badge/Status-Phase_2_Completed-success.svg)]()
 [![Backend](https://img.shields.io/badge/Backend-Go_1.21-blue.svg)]()
 [![Database](https://img.shields.io/badge/Database-PostgreSQL_16-blue.svg)]()
@@ -47,6 +49,12 @@ make gke-https-generate-demo-domain
 make gke-https-status DOMAIN_NAME=34-107-166-43.sslip.io
 make gke-https-smoke DOMAIN_NAME=34-107-166-43.sslip.io
 ```
+
+## 🤖 CI/CD
+
+PR 自動跑 Go 測試、`go vet`、`golangci-lint`、Dockerfile build 驗證與 K8s manifest 驗證；merge 到 `main` 後 `.github/workflows/deploy.yml` 自動 build image 推到 Artifact Registry（`asia-east1-docker.pkg.dev/extreme-water-497313-j8/pacs/`）並 rolling-update GKE。失敗會自動 `kubectl rollout undo`。
+
+認證採 Workload Identity Federation（WIF），無 long-lived service-account key。詳細設定與維運操作見 **[CI/CD Guide](docs/CICDGuide.md)**。
 
 ## 🏗 系統架構簡介
 
