@@ -16,7 +16,7 @@ on:
         required: false
         type: string
       services:
-        description: 'Comma-separated services to build/deploy (default: auto-detect). Allowed: access-api, event-processor, reporting-api, anomaly-detector, mv-refresher, org-sync, frontend, all'
+        description: 'Comma-separated services to build/deploy (default: auto-detect). Allowed: access-api, event-processor, reporting-api, anomaly-detector, mv-refresher, frontend, all'
         required: false
         type: string
         default: ''
@@ -38,7 +38,7 @@ permissions:
   packages: read
 
 env:
-  PACS_BACKEND_SERVICES: 'access-api event-processor reporting-api anomaly-detector mv-refresher org-sync'
+  PACS_BACKEND_SERVICES: 'access-api event-processor reporting-api anomaly-detector mv-refresher'
 
 jobs:
   preflight:
